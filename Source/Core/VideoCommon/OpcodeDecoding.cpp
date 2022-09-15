@@ -63,11 +63,13 @@ public:
       {
         VertexLoaderManager::g_main_vat_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
         VertexLoaderManager::g_bases_dirty = true;
+        m_vertex_sizes_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
       }
       else if (sub_command == CP_VAT_REG_A || sub_command == CP_VAT_REG_B ||
                sub_command == CP_VAT_REG_C)
       {
         VertexLoaderManager::g_main_vat_dirty[command & CP_VAT_MASK] = true;
+        m_vertex_sizes_dirty[command & CP_VAT_MASK] = true;
       }
       else if (sub_command == ARRAY_BASE)
       {
@@ -81,11 +83,13 @@ public:
       if (sub_command == VCD_LO || sub_command == VCD_HI)
       {
         VertexLoaderManager::g_preprocess_vat_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
+        m_vertex_sizes_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
       }
       else if (sub_command == CP_VAT_REG_A || sub_command == CP_VAT_REG_B ||
                sub_command == CP_VAT_REG_C)
       {
         VertexLoaderManager::g_preprocess_vat_dirty[command & CP_VAT_MASK] = true;
+        m_vertex_sizes_dirty[command & CP_VAT_MASK] = true;
       }
     }
     GetCPState().LoadCPReg(command, value);
@@ -228,6 +232,19 @@ public:
       return g_main_cp_state;
   }
 
+  OPCODE_CALLBACK(u32 GetVertexSize(u8 vat))
+  {
+    if (m_vertex_sizes_dirty[vat]) [[unlikely]]
+    {
+      m_vertex_sizes_dirty[vat] = false;
+      m_vertex_sizes[vat] =
+          VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
+    }
+    return m_vertex_sizes[vat];
+  }
+
+  BitSet8 m_vertex_sizes_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
+  std::array<u32, CP_NUM_VAT_REG> m_vertex_sizes;
   u32 m_cycles = 0;
   bool m_in_display_list = false;
 };
