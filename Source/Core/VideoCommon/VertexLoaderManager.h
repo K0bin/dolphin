@@ -42,8 +42,11 @@ NativeVertexFormat* GetOrCreateMatchingFormat(const PortableVertexDeclaration& d
 NativeVertexFormat* GetUberVertexFormat(const PortableVertexDeclaration& decl);
 
 // Returns -1 if buf_size is insufficient, else the amount of bytes consumed
-int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int count, DataReader src,
-                bool is_preprocess);
+template <bool IsPreprocess = false>
+int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int count, DataReader src);
+
+template<bool IsPreprocess = false>
+VertexLoaderBase* RefreshLoader(int vtx_attr_group);
 
 NativeVertexFormat* GetCurrentVertexFormat();
 

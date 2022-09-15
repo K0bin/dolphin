@@ -110,6 +110,11 @@ public:
 
   // Get the current CP state.  Needed for vertex decoding; will also be mutated for CP commands.
   virtual CPState& GetCPState() = 0;
+
+  virtual u32 GetVertexSize(u8 vat)
+  {
+    return VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
+  }
 #endif
 };
 

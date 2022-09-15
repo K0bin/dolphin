@@ -198,11 +198,12 @@ NativeVertexFormat* GetUberVertexFormat(const PortableVertexDeclaration& decl)
   return GetOrCreateMatchingFormat(new_decl);
 }
 
-static VertexLoaderBase* RefreshLoader(int vtx_attr_group, bool preprocess = false)
+template<bool IsPreprocess>
+VertexLoaderBase* RefreshLoader(int vtx_attr_group)
 {
-  CPState* state = preprocess ? &g_preprocess_cp_state : &g_main_cp_state;
-  BitSet8& attr_dirty = preprocess ? g_preprocess_vat_dirty : g_main_vat_dirty;
-  auto& vertex_loaders = preprocess ? g_preprocess_vertex_loaders : g_main_vertex_loaders;
+  CPState* state = IsPreprocess ? &g_preprocess_cp_state : &g_main_cp_state;
+  BitSet8& attr_dirty = IsPreprocess ? g_preprocess_vat_dirty : g_main_vat_dirty;
+  auto& vertex_loaders = IsPreprocess ? g_preprocess_vertex_loaders : g_main_vertex_loaders;
   g_current_vat = vtx_attr_group;
 
   VertexLoaderBase* loader;
@@ -210,7 +211,7 @@ static VertexLoaderBase* RefreshLoader(int vtx_attr_group, bool preprocess = fal
   {
     // We are not allowed to create a native vertex format on preprocessing as this is on the wrong
     // thread
-    bool check_for_native_format = !preprocess;
+    bool check_for_native_format = !IsPreprocess;
 
     VertexLoaderUID uid(state->vtx_desc, state->vtx_attr[vtx_attr_group]);
     std::lock_guard<std::mutex> lk(s_vertex_loader_map_lock);
@@ -245,11 +246,14 @@ static VertexLoaderBase* RefreshLoader(int vtx_attr_group, bool preprocess = fal
   }
 
   // Lookup pointers for any vertex arrays.
-  if (!preprocess)
+  if (!IsPreprocess)
     UpdateVertexArrayPointers();
 
   return loader;
 }
+
+template VertexLoaderBase* RefreshLoader<false>(int vtx_attr_group);
+template VertexLoaderBase* RefreshLoader<true>(int vtx_attr_group);
 
 static void CheckCPConfiguration(int vtx_attr_group)
 {
@@ -335,20 +339,20 @@ static void CheckCPConfiguration(int vtx_attr_group)
   }
 }
 
-int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int count, DataReader src,
-                bool is_preprocess)
+template <bool IsPreprocess>
+int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int count, DataReader src)
 {
   if (count == 0)
     return 0;
   ASSERT(count > 0);
 
-  VertexLoaderBase* loader = RefreshLoader(vtx_attr_group, is_preprocess);
+  VertexLoaderBase* loader = RefreshLoader<IsPreprocess>(vtx_attr_group);
 
   int size = count * loader->m_vertex_size;
   if ((int)src.size() < size)
     return -1;
 
-  if (is_preprocess)
+  if (IsPreprocess)
     return size;
 
   CheckCPConfiguration(vtx_attr_group);
@@ -381,6 +385,10 @@ int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int coun
   INCSTAT(g_stats.this_frame.num_primitive_joins);
   return size;
 }
+
+
+template int RunVertices<false>(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int count, DataReader src);
+template int RunVertices<true>(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int count, DataReader src);
 
 NativeVertexFormat* GetCurrentVertexFormat()
 {
