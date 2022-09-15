@@ -234,8 +234,7 @@ static DOLPHIN_FORCE_INLINE u32 RunCommand(const u8* data, u32 available, T& cal
           (cmdbyte & OpcodeDecoder::GX_PRIMITIVE_MASK) >> OpcodeDecoder::GX_PRIMITIVE_SHIFT);
       const u8 vat = cmdbyte & OpcodeDecoder::GX_VAT_MASK;
 
-      const u32 vertex_size = VertexLoaderBase::GetVertexSize(callback.GetCPState().vtx_desc,
-                                                              callback.GetCPState().vtx_attr[vat]);
+      const u32 vertex_size = callback.GetVertexSize(vat);
       const u16 num_vertices = Common::swap16(&data[1]);
 
       if (available < 3 + num_vertices * vertex_size)

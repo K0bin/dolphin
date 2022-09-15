@@ -233,8 +233,8 @@ public:
     const BitSet8& attr_dirty = is_preprocess ? VertexLoaderManager::g_preprocess_vat_dirty : VertexLoaderManager::g_main_vat_dirty;
     if (!attr_dirty[vat]) [[likely]]
     {
-      auto& vertex_loaders = is_preprocess ? VertexLoaderManager::g_preprocess_vertex_loaders : VertexLoaderManager::g_main_vertex_loaders;
-      VertexLoaderBase* loader = vertex_loaders[vat];
+      const auto& vertex_loaders = is_preprocess ? VertexLoaderManager::g_preprocess_vertex_loaders : VertexLoaderManager::g_main_vertex_loaders;
+      const VertexLoaderBase* loader = vertex_loaders[vat];
       return loader->m_vertex_size;
     }
     else
