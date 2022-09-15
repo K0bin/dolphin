@@ -46,7 +46,7 @@ template <bool IsPreprocess = false>
 int RunVertices(int vtx_attr_group, OpcodeDecoder::Primitive primitive, int count, DataReader src);
 
 template<bool IsPreprocess = false>
-void CreateLoader(int vtx_attr_group);
+VertexLoaderBase* RefreshLoader(int vtx_attr_group);
 
 NativeVertexFormat* GetCurrentVertexFormat();
 
@@ -69,33 +69,7 @@ extern u32 g_current_components;
 extern BitSet8 g_main_vat_dirty;
 extern BitSet8 g_preprocess_vat_dirty;
 extern bool g_bases_dirty;  // Main only
+extern u8 g_current_vat;    // Main only
 extern std::array<VertexLoaderBase*, CP_NUM_VAT_REG> g_main_vertex_loaders;
 extern std::array<VertexLoaderBase*, CP_NUM_VAT_REG> g_preprocess_vertex_loaders;
-
-template<bool IsPreprocess = false, bool DoUpdateVertexArrayPointers = true>
-DOLPHIN_FORCE_INLINE VertexLoaderBase* RefreshLoader(int vtx_attr_group)
-{
-  BitSet8& attr_dirty = []() constexpr -> BitSet8& { if constexpr (IsPreprocess) {
-    return g_preprocess_vat_dirty;
-  } else {
-    return g_main_vat_dirty;
-  } }();
-  const std::array<VertexLoaderBase*, CP_NUM_VAT_REG>& vertex_loaders = []() constexpr -> const std::array<VertexLoaderBase*, CP_NUM_VAT_REG>& { if constexpr (IsPreprocess) {
-    return g_preprocess_vertex_loaders;
-  } else {
-    return g_main_vertex_loaders;
-  } }();
-
-  if (attr_dirty[vtx_attr_group]) [[unlikely]]
-  {
-    CreateLoader<IsPreprocess>(vtx_attr_group);
-  }
-
-  // Lookup pointers for any vertex arrays.
-  if constexpr (!IsPreprocess && DoUpdateVertexArrayPointers)
-    UpdateVertexArrayPointers();
-
-  return vertex_loaders[vtx_attr_group];
-}
-
 }  // namespace VertexLoaderManager

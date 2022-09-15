@@ -230,7 +230,7 @@ public:
 
   OPCODE_CALLBACK(u32 GetVertexSize(u8 vat))
   {
-    VertexLoaderBase* loader = VertexLoaderManager::RefreshLoader<is_preprocess, false>(vat);
+    VertexLoaderBase* loader = VertexLoaderManager::RefreshLoader<is_preprocess>(vat);
     return loader->m_vertex_size;
   }
 

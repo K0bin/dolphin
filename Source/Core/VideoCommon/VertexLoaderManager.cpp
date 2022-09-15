@@ -54,6 +54,7 @@ Common::EnumMap<u8*, CPArray::TexCoord7> cached_arraybases;
 BitSet8 g_main_vat_dirty;
 BitSet8 g_preprocess_vat_dirty;
 bool g_bases_dirty;  // Main only
+u8 g_current_vat;    // Main only
 std::array<VertexLoaderBase*, CP_NUM_VAT_REG> g_main_vertex_loaders;
 std::array<VertexLoaderBase*, CP_NUM_VAT_REG> g_preprocess_vertex_loaders;
 
@@ -198,45 +199,61 @@ NativeVertexFormat* GetUberVertexFormat(const PortableVertexDeclaration& decl)
 }
 
 template<bool IsPreprocess>
-void CreateLoader(int vtx_attr_group)
+VertexLoaderBase* RefreshLoader(int vtx_attr_group)
 {
   CPState* state = IsPreprocess ? &g_preprocess_cp_state : &g_main_cp_state;
   BitSet8& attr_dirty = IsPreprocess ? g_preprocess_vat_dirty : g_main_vat_dirty;
   auto& vertex_loaders = IsPreprocess ? g_preprocess_vertex_loaders : g_main_vertex_loaders;
+  g_current_vat = vtx_attr_group;
 
   VertexLoaderBase* loader;
-
-  // We are not allowed to create a native vertex format on preprocessing as this is on the wrong
-  // thread
-  bool check_for_native_format = !IsPreprocess;
-
-  VertexLoaderUID uid(state->vtx_desc, state->vtx_attr[vtx_attr_group]);
-  std::lock_guard<std::mutex> lk(s_vertex_loader_map_lock);
-  VertexLoaderMap::iterator iter = s_vertex_loader_map.find(uid);
-  if (iter != s_vertex_loader_map.end())
+  if (attr_dirty[vtx_attr_group])
   {
-    loader = iter->second.get();
-    check_for_native_format &= !loader->m_native_vertex_format;
+    // We are not allowed to create a native vertex format on preprocessing as this is on the wrong
+    // thread
+    bool check_for_native_format = !IsPreprocess;
+
+    VertexLoaderUID uid(state->vtx_desc, state->vtx_attr[vtx_attr_group]);
+    std::lock_guard<std::mutex> lk(s_vertex_loader_map_lock);
+    VertexLoaderMap::iterator iter = s_vertex_loader_map.find(uid);
+    if (iter != s_vertex_loader_map.end())
+    {
+      loader = iter->second.get();
+      check_for_native_format &= !loader->m_native_vertex_format;
+    }
+    else
+    {
+      s_vertex_loader_map[uid] =
+          VertexLoaderBase::CreateVertexLoader(state->vtx_desc, state->vtx_attr[vtx_attr_group]);
+      loader = s_vertex_loader_map[uid].get();
+      INCSTAT(g_stats.num_vertex_loaders);
+    }
+    if (check_for_native_format)
+    {
+      // search for a cached native vertex format
+      const PortableVertexDeclaration& format = loader->m_native_vtx_decl;
+      std::unique_ptr<NativeVertexFormat>& native = s_native_vertex_map[format];
+      if (!native)
+        native = g_renderer->CreateNativeVertexFormat(format);
+      loader->m_native_vertex_format = native.get();
+    }
+    vertex_loaders[vtx_attr_group] = loader;
+    attr_dirty[vtx_attr_group] = false;
   }
   else
   {
-    s_vertex_loader_map[uid] =
-        VertexLoaderBase::CreateVertexLoader(state->vtx_desc, state->vtx_attr[vtx_attr_group]);
-    loader = s_vertex_loader_map[uid].get();
-    INCSTAT(g_stats.num_vertex_loaders);
+    loader = vertex_loaders[vtx_attr_group];
   }
-  if (check_for_native_format)
-  {
-    // search for a cached native vertex format
-    const PortableVertexDeclaration& format = loader->m_native_vtx_decl;
-    std::unique_ptr<NativeVertexFormat>& native = s_native_vertex_map[format];
-    if (!native)
-      native = g_renderer->CreateNativeVertexFormat(format);
-    loader->m_native_vertex_format = native.get();
-  }
-  vertex_loaders[vtx_attr_group] = loader;
-  attr_dirty[vtx_attr_group] = false;
+
+  // Lookup pointers for any vertex arrays.
+  if (!IsPreprocess)
+    UpdateVertexArrayPointers();
+
+  return loader;
 }
+
+template VertexLoaderBase* RefreshLoader<false>(int vtx_attr_group);
+template VertexLoaderBase* RefreshLoader<true>(int vtx_attr_group);
 
 static void CheckCPConfiguration(int vtx_attr_group)
 {
