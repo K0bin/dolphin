@@ -71,6 +71,9 @@ struct Statistics
 
     int num_efb_peeks;
     int num_efb_pokes;
+
+    int vertex_size_cache_hits;
+    int vertex_size_cache_misses;
   };
   ThisFrame this_frame;
   void ResetFrame();

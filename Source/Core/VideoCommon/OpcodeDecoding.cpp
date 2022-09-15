@@ -237,6 +237,9 @@ public:
       m_vertex_sizes_dirty[vat] = false;
       m_vertex_sizes[vat] =
           VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
+      g_stats.this_frame.vertex_size_cache_misses++;
+    } else {
+      g_stats.this_frame.vertex_size_cache_hits++;
     }
     return m_vertex_sizes[vat];
   }
