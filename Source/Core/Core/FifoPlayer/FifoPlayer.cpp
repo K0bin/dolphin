@@ -25,6 +25,7 @@
 #include "Core/PowerPC/PowerPC.h"
 #include "VideoCommon/BPMemory.h"
 #include "VideoCommon/CommandProcessor.h"
+#include "VideoCommon/VertexLoaderBase.h"
 #include "VideoCommon/VideoCommon.h"
 
 // We need to include TextureDecoder.h for the texMem array.
@@ -54,6 +55,11 @@ public:
   OPCODE_CALLBACK(void OnCommand(const u8* data, u32 size));
 
   OPCODE_CALLBACK(CPState& GetCPState()) { return m_cpmem; }
+
+  OPCODE_CALLBACK(u32 GetVertexSize(u8 vat))
+  {
+    return VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
+  }
 
   bool m_start_of_primitives = false;
   bool m_end_of_primitives = false;

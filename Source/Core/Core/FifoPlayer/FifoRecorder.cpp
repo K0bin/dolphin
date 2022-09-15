@@ -14,6 +14,7 @@
 #include "Core/HW/Memmap.h"
 
 #include "VideoCommon/OpcodeDecoding.h"
+#include "VideoCommon/VertexLoaderBase.h"
 #include "VideoCommon/XFStructs.h"
 
 class FifoRecorder::FifoRecordAnalyzer : public OpcodeDecoder::Callback
@@ -44,6 +45,11 @@ public:
   OPCODE_CALLBACK(void OnCommand(const u8* data, u32 size)) {}
 
   OPCODE_CALLBACK(CPState& GetCPState()) { return m_cpmem; }
+
+  OPCODE_CALLBACK(u32 GetVertexSize(u8 vat))
+  {
+    return VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
+  }
 
 private:
   void ProcessVertexComponent(CPArray array_index, VertexComponentFormat array_type,
