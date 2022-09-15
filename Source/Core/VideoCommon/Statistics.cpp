@@ -93,6 +93,7 @@ void Statistics::Display() const
   draw_statistic("Vertex Loaders", "%d", num_vertex_loaders);
   draw_statistic("EFB peeks:", "%d", this_frame.num_efb_peeks);
   draw_statistic("EFB pokes:", "%d", this_frame.num_efb_pokes);
+  draw_statistic("vertex size cache hitrate:", "%f", (float(this_frame.vertex_size_cache_hits) / float(this_frame.vertex_size_cache_hits + this_frame.vertex_size_cache_misses)) * 100.0f);
 
   ImGui::Columns(1);
 
