@@ -230,8 +230,17 @@ public:
 
   OPCODE_CALLBACK(u32 GetVertexSize(u8 vat))
   {
-    VertexLoaderBase* loader = VertexLoaderManager::RefreshLoader<is_preprocess>(vat);
-    return loader->m_vertex_size;
+    const BitSet8& attr_dirty = is_preprocess ? VertexLoaderManager::g_preprocess_vat_dirty : VertexLoaderManager::g_main_vat_dirty;
+    if (!attr_dirty[vat]) [[likely]]
+    {
+      auto& vertex_loaders = is_preprocess ? VertexLoaderManager::g_preprocess_vertex_loaders : VertexLoaderManager::g_main_vertex_loaders;
+      VertexLoaderBase* loader = vertex_loaders[vat];
+      return loader->m_vertex_size;
+    }
+    else
+    {
+      return VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
+    }
   }
 
   u32 m_cycles = 0;
