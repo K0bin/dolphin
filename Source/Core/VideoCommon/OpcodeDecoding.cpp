@@ -38,6 +38,12 @@ template <bool is_preprocess>
 class RunCallback final : public Callback
 {
 public:
+  RunCallback() {
+    for (uint32_t i = 0; i < CP_NUM_VAT_REG; i++) {
+      m_vertex_sizes[i] = VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[i]);
+    }
+  }
+
   OPCODE_CALLBACK(void OnXF(u16 address, u8 count, const u8* data))
   {
     m_cycles += 18 + 6 * count;
@@ -63,13 +69,11 @@ public:
       {
         VertexLoaderManager::g_main_vat_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
         VertexLoaderManager::g_bases_dirty = true;
-        m_vertex_sizes_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
       }
       else if (sub_command == CP_VAT_REG_A || sub_command == CP_VAT_REG_B ||
                sub_command == CP_VAT_REG_C)
       {
         VertexLoaderManager::g_main_vat_dirty[command & CP_VAT_MASK] = true;
-        m_vertex_sizes_dirty[command & CP_VAT_MASK] = true;
       }
       else if (sub_command == ARRAY_BASE)
       {
@@ -91,6 +95,19 @@ public:
       }
     }
     GetCPState().LoadCPReg(command, value);
+
+    if (sub_command == VCD_LO || sub_command == VCD_HI)
+    {
+      for (uint32_t i = 0; i < CP_NUM_VAT_REG; i++) {
+        m_vertex_sizes[i] = VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[i]);
+      }
+    }
+    else if (sub_command == CP_VAT_REG_A || sub_command == CP_VAT_REG_B ||
+               sub_command == CP_VAT_REG_C)
+    {
+      u8 vat = command & CP_VAT_MASK;
+      m_vertex_sizes[vat] = VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
+    }
   }
   OPCODE_CALLBACK(void OnBP(u8 command, u32 value))
   {
@@ -232,17 +249,10 @@ public:
 
   OPCODE_CALLBACK(u32 GetVertexSize(u8 vat))
   {
-    if (m_vertex_sizes_dirty[vat]) [[unlikely]]
-    {
-      m_vertex_sizes_dirty[vat] = false;
-      m_vertex_sizes[vat] =
-          VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
-    }
     return m_vertex_sizes[vat];
   }
 
-  BitSet8 m_vertex_sizes_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
-  std::array<u32, CP_NUM_VAT_REG> m_vertex_sizes;
+  std::array<u32, CP_NUM_VAT_REG> m_vertex_sizes{};
   u32 m_cycles = 0;
   bool m_in_display_list = false;
 };
