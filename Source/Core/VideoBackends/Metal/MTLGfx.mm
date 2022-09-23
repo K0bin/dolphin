@@ -250,8 +250,10 @@ std::unique_ptr<AbstractPipeline> Metal::Gfx::CreatePipeline(const AbstractPipel
   return g_object_cache->CreatePipeline(config);
 }
 
-void Metal::Gfx::Flush()
+void Metal::Gfx::Flush(bool softFlush)
 {
+  if (softFlush)
+    return;
   @autoreleasepool
   {
     g_state_tracker->FlushEncoders();

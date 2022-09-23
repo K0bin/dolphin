@@ -261,8 +261,11 @@ void Gfx::UnbindTexture(const AbstractTexture* texture)
     D3D::stateman->ApplyTextures();
 }
 
-void Gfx::Flush()
+void Gfx::Flush(bool softFlush)
 {
+  if (softFlush)
+    return;
+
   D3D::context->Flush();
 }
 

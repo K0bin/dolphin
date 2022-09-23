@@ -444,8 +444,11 @@ void OGLGfx::OnConfigChanged(u32 bits)
     g_sampler_cache->Clear();
 }
 
-void OGLGfx::Flush()
+void OGLGfx::Flush(bool softFlush)
 {
+  if (softFlush)
+    return;
+
   // ensure all commands are sent to the GPU.
   // Otherwise the driver could batch several frames together.
   glFlush();

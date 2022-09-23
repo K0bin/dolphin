@@ -43,7 +43,7 @@ public:
                                                    const void* cache_data = nullptr,
                                                    size_t cache_data_length = 0) override;
 
-  void Flush() override;
+  void Flush(bool softFlush) override;
   void WaitForGPUIdle() override;
   void OnConfigChanged(u32 bits) override;
 

@@ -50,7 +50,7 @@ public:
 
   SwapChain* GetSwapChain() const { return m_swap_chain.get(); }
 
-  void Flush() override;
+  void Flush(bool softFlush) override;
   void WaitForGPUIdle() override;
   void OnConfigChanged(u32 bits) override;
 

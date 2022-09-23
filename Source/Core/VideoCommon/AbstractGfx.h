@@ -138,7 +138,7 @@ public:
   ConvertFramebufferRectangle(const MathUtil::Rectangle<int>& rect,
                               const AbstractFramebuffer* framebuffer) const;
 
-  virtual void Flush() {}
+  virtual void Flush(bool softFlush = false) {}
   virtual void WaitForGPUIdle() {}
 
   // For opengl's glDrawBuffer
