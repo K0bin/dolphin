@@ -63,11 +63,13 @@ public:
   bool m_start_of_primitives = false;
   bool m_end_of_primitives = false;
   bool m_efb_copy = false;
+  bool m_sync = false;
   // Internal state, copied to above in OnCommand
   bool m_was_primitive = false;
   bool m_is_primitive = false;
   bool m_is_copy = false;
   bool m_is_nop = false;
+  bool m_is_sync = false;
   CPState m_cpmem;
 };
 
@@ -117,6 +119,11 @@ void FifoPlaybackAnalyzer::AnalyzeFrames(FifoDataFile* file,
         analyzed.AddPart(FramePartType::EFBCopy, part_start, offset, analyzer.m_cpmem);
         part_start = offset;
       }
+      if (analyzer.m_sync)
+      {
+        analyzed.AddPart(FramePartType::Sync, part_start, offset, analyzer.m_cpmem);
+        part_start = offset;
+      }
     }
 
     // The frame should end with an EFB copy, so part_start should have been updated to the end.
@@ -129,6 +136,8 @@ void FifoPlaybackAnalyzer::OnBP(u8 command, u32 value)
 {
   if (command == BPMEM_TRIGGER_EFB_COPY)
     m_is_copy = true;
+  if (command == BPMEM_PE_TOKEN_ID || command == BPMEM_SETDRAWDONE)
+    m_is_sync = true;
 }
 
 void FifoPlaybackAnalyzer::OnPrimitiveCommand(OpcodeDecoder::Primitive primitive, u8 vat,
@@ -148,6 +157,7 @@ void FifoPlaybackAnalyzer::OnCommand(const u8* data, u32 size)
   m_start_of_primitives = false;
   m_end_of_primitives = false;
   m_efb_copy = false;
+  m_sync = false;
 
   if (!m_is_nop)
   {
@@ -157,12 +167,15 @@ void FifoPlaybackAnalyzer::OnCommand(const u8* data, u32 size)
       m_end_of_primitives = true;
     else if (m_is_copy)
       m_efb_copy = true;
+    else if (m_is_sync)
+      m_sync = true;
 
     m_was_primitive = m_is_primitive;
   }
   m_is_primitive = false;
   m_is_copy = false;
   m_is_nop = false;
+  m_is_sync = false;
 }
 }  // namespace
 

@@ -58,6 +58,7 @@ enum class FramePartType
   Commands,
   PrimitiveData,
   EFBCopy,
+  Sync
 };
 
 struct FramePart

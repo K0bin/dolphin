@@ -161,7 +161,7 @@ void FIFOAnalyzer::UpdateTree()
     const AnalyzedFrameInfo& frame_info = FifoPlayer::GetInstance().GetAnalyzedFrameInfo(frame);
     ASSERT(frame_info.parts.size() != 0);
 
-    Common::EnumMap<u32, FramePartType::EFBCopy> part_counts;
+    Common::EnumMap<u32, FramePartType::Sync> part_counts;
     u32 part_start = 0;
 
     for (u32 part_nr = 0; part_nr < frame_info.parts.size(); part_nr++)
@@ -176,6 +176,8 @@ void FIFOAnalyzer::UpdateTree()
         object_item = new QTreeWidgetItem({tr("Object %1").arg(part_type_nr)});
       else if (part.m_type == FramePartType::EFBCopy)
         object_item = new QTreeWidgetItem({tr("EFB copy %1").arg(part_type_nr)});
+      else if (part.m_type == FramePartType::Sync)
+        object_item = new QTreeWidgetItem({tr("Sync %1").arg(part_type_nr)});
       // We don't create dedicated labels for FramePartType::Command;
       // those are grouped with the primitive
 
