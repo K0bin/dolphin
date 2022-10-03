@@ -28,11 +28,6 @@ static bool IsOnThread(const Core::System& system)
   return system.IsDualCoreMode();
 }
 
-static void UpdateInterrupts_Wrapper(Core::System& system, u64 userdata, s64 cyclesLate)
-{
-  system.GetCommandProcessor().UpdateInterrupts(userdata);
-}
-
 void SCPFifoStruct::Init()
 {
   CPBase = 0;
@@ -121,9 +116,6 @@ void CommandProcessorManager::Init()
 
   m_interrupt_set.Clear();
   m_interrupt_waiting.Clear();
-
-  m_event_type_update_interrupts =
-      m_system.GetCoreTiming().RegisterEvent("CPInterrupt", UpdateInterrupts_Wrapper);
 }
 
 void CommandProcessorManager::RegisterMMIO(MMIO::Mapping* mmio, u32 base)
@@ -346,17 +338,6 @@ void CommandProcessorManager::GatherPipeBursted()
   // if we aren't linked, we don't care about gather pipe data
   if (!m_cp_ctrl_reg.GPLinkEnable)
   {
-    if (IsOnThread(m_system) && !m_system.GetFifo().UseDeterministicGPUThread())
-    {
-      // In multibuffer mode is not allowed write in the same FIFO attached to the GPU.
-      // Fix Pokemon XD in DC mode.
-      if ((processor_interface.m_fifo_cpu_end == m_fifo.CPEnd.load(std::memory_order_relaxed)) &&
-          (processor_interface.m_fifo_cpu_base == m_fifo.CPBase.load(std::memory_order_relaxed)) &&
-          m_fifo.CPReadWriteDistance.load(std::memory_order_relaxed) > 0)
-      {
-        m_system.GetFifo().FlushGpu();
-      }
-    }
     m_system.GetFifo().RunGpu();
     return;
   }
@@ -426,15 +407,6 @@ void CommandProcessorManager::UpdateInterrupts(u64 userdata)
   m_system.GetFifo().RunGpu();
 }
 
-void CommandProcessorManager::UpdateInterruptsFromVideoBackend(u64 userdata)
-{
-  if (!m_system.GetFifo().UseDeterministicGPUThread())
-  {
-    m_system.GetCoreTiming().ScheduleEvent(0, m_event_type_update_interrupts, userdata,
-                                           CoreTiming::FromThread::NON_CPU);
-  }
-}
-
 bool CommandProcessorManager::IsInterruptWaiting() const
 {
   return m_interrupt_waiting.IsSet();
@@ -502,7 +474,6 @@ void CommandProcessorManager::SetCPStatusFromGPU()
       {
         // Schedule the interrupt asynchronously
         m_interrupt_waiting.Set();
-        UpdateInterruptsFromVideoBackend(userdata);
       }
     }
     else
@@ -670,40 +641,10 @@ void CommandProcessorManager::HandleUnknownOpcode(u8 cmd_byte, const u8* buffer,
 
     // The panic alert contains an explanatory part that's worded differently depending on the
     // user's settings, so as to offer the most relevant advice to the user.
-    const char* advice;
-    if (IsOnThread(m_system) && !m_system.GetFifo().UseDeterministicGPUThread())
-    {
-      if (!m_system.GetCoreTiming().UseSyncOnSkipIdle() && !m_system.GetFifo().UseSyncGPU())
-      {
-// The SyncOnSkipIdle setting is only in the Android GUI, so we use the INI name on other platforms.
-//
-// TODO: Mark the Android string as translatable once we have translations on Android. It's
-// currently untranslatable so translators won't try to look up how they translated "Synchronize
-// GPU Thread" and "On Idle Skipping" and then not find those strings and become confused.
-#ifdef ANDROID
-        advice = "Please change the \"Synchronize GPU Thread\" setting to \"On Idle Skipping\"! "
-                 "It's currently set to \"Never\", which makes this problem very likely to happen.";
-#else
-        // i18n: Please leave SyncOnSkipIdle and True untranslated.
-        // The user needs to enter these terms as-is in an INI file.
-        advice = _trans("Please change the \"SyncOnSkipIdle\" setting to \"True\"! "
-                        "It's currently disabled, which makes this problem very likely to happen.");
-#endif
-      }
-      else
-      {
-        advice = _trans(
-            "This error is usually caused by the emulated GPU desyncing with the emulated CPU. "
-            "Turn off the \"Dual Core\" setting to avoid this.");
-      }
-    }
-    else
-    {
-      advice = _trans(
+    const char* advice = _trans(
           "This error is usually caused by the emulated GPU desyncing with the emulated CPU, "
           "but your current settings make this unlikely to happen. If this error is stopping the "
           "game from working, please report it to the developers.");
-    }
 
     PanicAlertFmtT("GFX FIFO: Unknown Opcode ({0:#04x} @ {1}, preprocess={2}).\n"
                    "\n"

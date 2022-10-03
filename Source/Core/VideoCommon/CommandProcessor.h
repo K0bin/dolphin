@@ -173,7 +173,6 @@ public:
   void SetCPStatusFromCPU();
   void GatherPipeBursted();
   void UpdateInterrupts(u64 userdata);
-  void UpdateInterruptsFromVideoBackend(u64 userdata);
 
   bool IsInterruptWaiting() const;
 

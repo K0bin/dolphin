@@ -1,6 +1,7 @@
 // Copyright 2008 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <Core/System.h>
 #include "VideoCommon/XFStructs.h"
 
 #include <bit>
@@ -265,7 +266,7 @@ void LoadIndexedXF(CPArray array, u32 index, u16 address, u8 size)
   u32* newData;
   auto& system = Core::System::GetInstance();
   auto& fifo = system.GetFifo();
-  if (fifo.UseDeterministicGPUThread())
+  if (system.IsDualCoreMode())
   {
     newData = static_cast<u32*>(fifo.PopFifoAuxBuffer(buf_size));
   }

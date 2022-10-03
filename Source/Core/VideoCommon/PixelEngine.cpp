@@ -211,16 +211,11 @@ void PixelEngineManager::RaiseEvent(int cycles_into_future)
 
   m_event_raised = true;
 
-  CoreTiming::FromThread from = CoreTiming::FromThread::NON_CPU;
-  s64 cycles = 0;  // we don't care about timings for dual core mode.
-  if (!m_system.IsDualCoreMode() || m_system.GetFifo().UseDeterministicGPUThread())
-  {
-    from = CoreTiming::FromThread::CPU;
+  CoreTiming::FromThread from = CoreTiming::FromThread::CPU;
 
-    // Hack: Dolphin's single-core gpu timings are way too fast. Enforce a minimum delay to give
-    //       games time to setup any interrupt state
-    cycles = std::max(500, cycles_into_future);
-  }
+  // Hack: Dolphin's single-core gpu timings are way too fast. Enforce a minimum delay to give
+  //       games time to setup any interrupt state
+  s64 cycles = std::max(500, cycles_into_future);
   m_system.GetCoreTiming().ScheduleEvent(cycles, m_event_type_set_token_finish, 0, from);
 }
 

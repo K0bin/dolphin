@@ -523,14 +523,6 @@ void CoreTimingManager::AdjustEventQueueTimes(u32 new_ppc_clock, u32 old_ppc_clo
 
 void CoreTimingManager::Idle()
 {
-  if (m_config_sync_on_skip_idle)
-  {
-    // When the FIFO is processing data we must not advance because in this way
-    // the VI will be desynchronized. So, We are waiting until the FIFO finish and
-    // while we process only the events required by the FIFO.
-    m_system.GetFifo().FlushGpu();
-  }
-
   auto& ppc_state = m_system.GetPPCState();
   PowerPC::UpdatePerformanceMonitor(ppc_state.downcount, 0, 0, ppc_state);
   m_idled_cycles += DowncountToCycles(ppc_state.downcount);

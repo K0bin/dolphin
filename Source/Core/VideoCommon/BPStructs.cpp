@@ -187,9 +187,6 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
       g_texture_cache->FlushStaleBinds();
       g_framebuffer_manager->InvalidatePeekCache(false);
       g_framebuffer_manager->RefreshPeekCache();
-      auto& system = Core::System::GetInstance();
-      if (!system.GetFifo().UseDeterministicGPUThread())
-        system.GetPixelEngine().SetFinish(cycles_into_future);  // may generate interrupt
       DEBUG_LOG_FMT(VIDEO, "GXSetDrawDone SetPEFinish (value: {:#04X})", bp.newvalue & 0xFFFF);
       return;
     }
@@ -206,12 +203,6 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
     g_texture_cache->FlushStaleBinds();
     g_framebuffer_manager->InvalidatePeekCache(false);
     g_framebuffer_manager->RefreshPeekCache();
-    auto& system = Core::System::GetInstance();
-    if (!system.GetFifo().UseDeterministicGPUThread())
-    {
-      system.GetPixelEngine().SetToken(static_cast<u16>(bp.newvalue & 0xFFFF), false,
-                                       cycles_into_future);
-    }
     DEBUG_LOG_FMT(VIDEO, "SetPEToken {:#06X}", bp.newvalue & 0xFFFF);
     return;
   }
@@ -222,12 +213,6 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
     g_texture_cache->FlushStaleBinds();
     g_framebuffer_manager->InvalidatePeekCache(false);
     g_framebuffer_manager->RefreshPeekCache();
-    auto& system = Core::System::GetInstance();
-    if (!system.GetFifo().UseDeterministicGPUThread())
-    {
-      system.GetPixelEngine().SetToken(static_cast<u16>(bp.newvalue & 0xFFFF), true,
-                                       cycles_into_future);
-    }
     DEBUG_LOG_FMT(VIDEO, "SetPEToken + INT {:#06X}", bp.newvalue & 0xFFFF);
     return;
   }

@@ -67,7 +67,6 @@ public:
   void PushFifoAuxBuffer(const void* ptr, size_t size);
   void* PopFifoAuxBuffer(size_t size);
 
-  void FlushGpu();
   void RunGpu();
   void GpuMaySleep();
   void RunGpuLoop();
