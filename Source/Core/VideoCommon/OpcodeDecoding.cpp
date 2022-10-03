@@ -12,6 +12,7 @@
 // it right when they are called. The reason is that the vertex format affects the sizes of the
 // vertices.
 
+#include <Core/System.h>
 #include "VideoCommon/OpcodeDecoding.h"
 
 #include "Common/Assert.h"
@@ -159,7 +160,7 @@ public:
       {
         const u8* start_address;
 
-        if (Fifo::UseDeterministicGPUThread())
+        if (Core::System::GetInstance().IsDualCoreMode())
           start_address = static_cast<u8*>(Fifo::PopFifoAuxBuffer(size));
         else
           start_address = Memory::GetPointer(address);

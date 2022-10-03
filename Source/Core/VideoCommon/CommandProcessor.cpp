@@ -23,8 +23,6 @@
 
 namespace CommandProcessor
 {
-static CoreTiming::EventType* et_UpdateInterrupts;
-
 // TODO(ector): Warn on bbox read/write
 
 // STATE_TO_SAVE
@@ -43,16 +41,6 @@ static Common::Flag s_interrupt_set;
 static Common::Flag s_interrupt_waiting;
 
 static bool s_is_fifo_error_seen = false;
-
-static bool IsOnThread()
-{
-  return Core::System::GetInstance().IsDualCoreMode();
-}
-
-static void UpdateInterrupts_Wrapper(u64 userdata, s64 cyclesLate)
-{
-  UpdateInterrupts(userdata);
-}
 
 void SCPFifoStruct::Init()
 {
@@ -148,8 +136,6 @@ void Init()
 
   s_interrupt_set.Clear();
   s_interrupt_waiting.Clear();
-
-  et_UpdateInterrupts = CoreTiming::RegisterEvent("CPInterrupt", UpdateInterrupts_Wrapper);
 }
 
 u32 GetPhysicalAddressMask()
@@ -267,48 +253,14 @@ void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
   // Some MMIOs have different handlers for single core vs. dual core mode.
   mmio->Register(
       base | FIFO_RW_DISTANCE_LO,
-      IsOnThread() ? MMIO::ComplexRead<u16>([](u32) {
-        if (fifo.CPWritePointer.load(std::memory_order_relaxed) >=
-            fifo.SafeCPReadPointer.load(std::memory_order_relaxed))
-        {
-          return static_cast<u16>(fifo.CPWritePointer.load(std::memory_order_relaxed) -
-                                  fifo.SafeCPReadPointer.load(std::memory_order_relaxed));
-        }
-        else
-        {
-          return static_cast<u16>(fifo.CPEnd.load(std::memory_order_relaxed) -
-                                  fifo.SafeCPReadPointer.load(std::memory_order_relaxed) +
-                                  fifo.CPWritePointer.load(std::memory_order_relaxed) -
-                                  fifo.CPBase.load(std::memory_order_relaxed) + 32);
-        }
-      }) :
-                     MMIO::DirectRead<u16>(MMIO::Utils::LowPart(&fifo.CPReadWriteDistance)),
+      MMIO::DirectRead<u16>(MMIO::Utils::LowPart(&fifo.CPReadWriteDistance)),
       MMIO::DirectWrite<u16>(MMIO::Utils::LowPart(&fifo.CPReadWriteDistance),
                              WMASK_LO_ALIGN_32BIT));
   mmio->Register(base | FIFO_RW_DISTANCE_HI,
-                 IsOnThread() ?
-                     MMIO::ComplexRead<u16>([](u32) {
-                       Fifo::SyncGPUForRegisterAccess();
-                       if (fifo.CPWritePointer.load(std::memory_order_relaxed) >=
-                           fifo.SafeCPReadPointer.load(std::memory_order_relaxed))
-                       {
-                         return (fifo.CPWritePointer.load(std::memory_order_relaxed) -
-                                 fifo.SafeCPReadPointer.load(std::memory_order_relaxed)) >>
-                                16;
-                       }
-                       else
-                       {
-                         return (fifo.CPEnd.load(std::memory_order_relaxed) -
-                                 fifo.SafeCPReadPointer.load(std::memory_order_relaxed) +
-                                 fifo.CPWritePointer.load(std::memory_order_relaxed) -
-                                 fifo.CPBase.load(std::memory_order_relaxed) + 32) >>
-                                16;
-                       }
-                     }) :
-                     MMIO::ComplexRead<u16>([](u32) {
-                       Fifo::SyncGPUForRegisterAccess();
-                       return fifo.CPReadWriteDistance.load(std::memory_order_relaxed) >> 16;
-                     }),
+                   MMIO::ComplexRead<u16>([](u32) {
+                     Fifo::SyncGPUForRegisterAccess();
+                     return fifo.CPReadWriteDistance.load(std::memory_order_relaxed) >> 16;
+                   }),
                  MMIO::ComplexWrite<u16>([WMASK_HI_RESTRICT](u32, u16 val) {
                    Fifo::SyncGPUForRegisterAccess();
                    WriteHigh(fifo.CPReadWriteDistance, val & WMASK_HI_RESTRICT);
@@ -316,28 +268,17 @@ void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
                  }));
   mmio->Register(
       base | FIFO_READ_POINTER_LO,
-      IsOnThread() ? MMIO::DirectRead<u16>(MMIO::Utils::LowPart(&fifo.SafeCPReadPointer)) :
-                     MMIO::DirectRead<u16>(MMIO::Utils::LowPart(&fifo.CPReadPointer)),
+      MMIO::DirectRead<u16>(MMIO::Utils::LowPart(&fifo.CPReadPointer)),
       MMIO::DirectWrite<u16>(MMIO::Utils::LowPart(&fifo.CPReadPointer), WMASK_LO_ALIGN_32BIT));
   mmio->Register(base | FIFO_READ_POINTER_HI,
-                 IsOnThread() ? MMIO::ComplexRead<u16>([](u32) {
-                   Fifo::SyncGPUForRegisterAccess();
-                   return fifo.SafeCPReadPointer.load(std::memory_order_relaxed) >> 16;
-                 }) :
-                                MMIO::ComplexRead<u16>([](u32) {
-                                  Fifo::SyncGPUForRegisterAccess();
-                                  return fifo.CPReadPointer.load(std::memory_order_relaxed) >> 16;
-                                }),
-                 IsOnThread() ? MMIO::ComplexWrite<u16>([WMASK_HI_RESTRICT](u32, u16 val) {
-                   Fifo::SyncGPUForRegisterAccess();
-                   WriteHigh(fifo.CPReadPointer, val & WMASK_HI_RESTRICT);
-                   fifo.SafeCPReadPointer.store(fifo.CPReadPointer.load(std::memory_order_relaxed),
-                                                std::memory_order_relaxed);
-                 }) :
-                                MMIO::ComplexWrite<u16>([WMASK_HI_RESTRICT](u32, u16 val) {
-                                  Fifo::SyncGPUForRegisterAccess();
-                                  WriteHigh(fifo.CPReadPointer, val & WMASK_HI_RESTRICT);
-                                }));
+                 MMIO::ComplexRead<u16>([](u32) {
+                    Fifo::SyncGPUForRegisterAccess();
+                    return fifo.CPReadPointer.load(std::memory_order_relaxed) >> 16;
+                  }),
+                 MMIO::ComplexWrite<u16>([WMASK_HI_RESTRICT](u32, u16 val) {
+                    Fifo::SyncGPUForRegisterAccess();
+                    WriteHigh(fifo.CPReadPointer, val & WMASK_HI_RESTRICT);
+                  }));
 }
 
 void GatherPipeBursted()
@@ -347,17 +288,6 @@ void GatherPipeBursted()
   // if we aren't linked, we don't care about gather pipe data
   if (!m_CPCtrlReg.GPLinkEnable)
   {
-    if (IsOnThread() && !Fifo::UseDeterministicGPUThread())
-    {
-      // In multibuffer mode is not allowed write in the same FIFO attached to the GPU.
-      // Fix Pokemon XD in DC mode.
-      if ((ProcessorInterface::Fifo_CPUEnd == fifo.CPEnd.load(std::memory_order_relaxed)) &&
-          (ProcessorInterface::Fifo_CPUBase == fifo.CPBase.load(std::memory_order_relaxed)) &&
-          fifo.CPReadWriteDistance.load(std::memory_order_relaxed) > 0)
-      {
-        Fifo::FlushGpu();
-      }
-    }
     Fifo::RunGpu();
     return;
   }
@@ -426,17 +356,6 @@ void UpdateInterrupts(u64 userdata)
   Fifo::RunGpu();
 }
 
-void UpdateInterruptsFromVideoBackend(u64 userdata)
-{
-  if (!Fifo::UseDeterministicGPUThread())
-    CoreTiming::ScheduleEvent(0, et_UpdateInterrupts, userdata, CoreTiming::FromThread::NON_CPU);
-}
-
-bool IsInterruptWaiting()
-{
-  return s_interrupt_waiting.IsSet();
-}
-
 void SetCPStatusFromGPU()
 {
   // breakpoint
@@ -493,19 +412,7 @@ void SetCPStatusFromGPU()
   if (interrupt != s_interrupt_set.IsSet() && !s_interrupt_waiting.IsSet())
   {
     u64 userdata = interrupt ? 1 : 0;
-    if (IsOnThread())
-    {
-      if (!interrupt || bpInt || undfInt || ovfInt)
-      {
-        // Schedule the interrupt asynchronously
-        s_interrupt_waiting.Set();
-        CommandProcessor::UpdateInterruptsFromVideoBackend(userdata);
-      }
-    }
-    else
-    {
-      CommandProcessor::UpdateInterrupts(userdata);
-    }
+    CommandProcessor::UpdateInterrupts(userdata);
   }
 }
 
@@ -531,19 +438,7 @@ void SetCPStatusFromCPU()
   if (interrupt != s_interrupt_set.IsSet() && !s_interrupt_waiting.IsSet())
   {
     u64 userdata = interrupt ? 1 : 0;
-    if (IsOnThread())
-    {
-      if (!interrupt || bpInt || undfInt || ovfInt)
-      {
-        s_interrupt_set.Set(interrupt);
-        DEBUG_LOG_FMT(COMMANDPROCESSOR, "Interrupt set");
-        ProcessorInterface::SetInterrupt(INT_CAUSE_CP, interrupt);
-      }
-    }
-    else
-    {
-      CommandProcessor::UpdateInterrupts(userdata);
-    }
+    CommandProcessor::UpdateInterrupts(userdata);
   }
 }
 

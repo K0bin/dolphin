@@ -16,7 +16,6 @@ void Prepare();  // Must be called from the CPU thread.
 void DoState(PointerWrap& f);
 void PauseAndLock(bool doLock, bool unpauseOnUnlock);
 void UpdateWantDeterminism(bool want);
-bool UseDeterministicGPUThread();
 
 // Used for diagnostics.
 enum class SyncGPUReason
