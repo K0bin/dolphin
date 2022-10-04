@@ -159,10 +159,7 @@ public:
       {
         const u8* start_address;
 
-        if (Fifo::UseDeterministicGPUThread())
-          start_address = static_cast<u8*>(Fifo::PopFifoAuxBuffer(size));
-        else
-          start_address = Memory::GetPointer(address);
+        start_address = Memory::GetPointer(address);
 
         // Avoid the crash if Memory::GetPointer failed ..
         if (start_address != nullptr)

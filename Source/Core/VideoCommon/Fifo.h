@@ -15,8 +15,6 @@ void Shutdown();
 void Prepare();  // Must be called from the CPU thread.
 void DoState(PointerWrap& f);
 void PauseAndLock(bool doLock, bool unpauseOnUnlock);
-void UpdateWantDeterminism(bool want);
-bool UseDeterministicGPUThread();
 
 // Used for diagnostics.
 enum class SyncGPUReason
@@ -29,8 +27,6 @@ enum class SyncGPUReason
   Swap,
   AuxSpace,
 };
-// In deterministic GPU thread mode this waits for the GPU to be done with pending work.
-void SyncGPU(SyncGPUReason reason, bool may_move_read_ptr = true);
 
 // In single core mode, this runs the GPU for a single slice.
 // In dual core mode, this synchronizes with the GPU thread.

@@ -251,16 +251,8 @@ void LoadIndexedXF(CPArray array, u32 index, u16 address, u8 size)
   // load stuff from array to address in xf mem
 
   u32* currData = (u32*)(&xfmem) + address;
-  u32* newData;
-  if (Fifo::UseDeterministicGPUThread())
-  {
-    newData = (u32*)Fifo::PopFifoAuxBuffer(size * sizeof(u32));
-  }
-  else
-  {
-    newData = (u32*)Memory::GetPointer(g_main_cp_state.array_bases[array] +
-                                       g_main_cp_state.array_strides[array] * index);
-  }
+  u32* newData = (u32*)Memory::GetPointer(g_main_cp_state.array_bases[array] +
+                                     g_main_cp_state.array_strides[array] * index);
   bool changed = false;
   for (u32 i = 0; i < size; ++i)
   {
