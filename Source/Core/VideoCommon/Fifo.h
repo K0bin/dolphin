@@ -35,7 +35,6 @@ enum class SyncGPUReason
 void SyncGPUForRegisterAccess();
 
 void PushFifoAuxBuffer(const void* ptr, size_t size);
-void* PopFifoAuxBuffer(size_t size);
 
 void FlushGpu();
 void RunGpu();
@@ -49,7 +48,7 @@ void ResetVideoBuffer();
 struct FifoChunk
 {
     std::vector<u8> data;
-    std::unordered_map<u32, u32> display_list_offsets;
+    std::unordered_map<u32, u32> memory_offsets;
 
     FifoChunk() = default;
 
@@ -58,20 +57,20 @@ struct FifoChunk
     FifoChunk(FifoChunk&& other) noexcept
     {
       data = std::move(other.data);
-      display_list_offsets = std::move(other.display_list_offsets);
+      memory_offsets = std::move(other.memory_offsets);
     }
 
     FifoChunk& operator = (FifoChunk&& other) noexcept
     {
       data = std::move(other.data);
-      display_list_offsets = std::move(other.display_list_offsets);
+      memory_offsets = std::move(other.memory_offsets);
       return *this;
     }
 
     void Reset()
     {
       data.clear();
-      display_list_offsets.clear();
+      memory_offsets.clear();
     }
 
     void CopyFrom(const u8* src, u32 length)
@@ -114,6 +113,15 @@ class FifoThread
 public:
   void Flush();
   void CopyFrom(const u8* src, u32 length);
+  bool IsEmpty() const
+  {
+    return m_submit_queue.Empty();
+  }
+
+  bool Pop(FifoChunk& chunk)
+  {
+    return m_submit_queue.Pop(chunk);
+  }
 
 private:
   FifoChunk m_write_chunk;
@@ -121,5 +129,7 @@ private:
   Common::SPSCQueue<FifoChunk, false> m_submit_queue;
   Common::SPSCQueue<FifoChunk, false> m_reuse_queue;
 };
+
+extern FifoThread g_fifo_thread;
 
 }  // namespace Fifo

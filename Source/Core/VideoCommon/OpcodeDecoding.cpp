@@ -108,7 +108,7 @@ public:
   {
     m_cycles += 6;
 
-    if constexpr (is_preprocess)
+    if constexpr (!is_preprocess)
       PreprocessIndexedXF(array, index, address, size);
     else
       LoadIndexedXF(array, index, address, size);
