@@ -192,13 +192,6 @@ void PushFifoAuxBuffer(const void* ptr, size_t size)
   s_fifo_aux_write_ptr += size;
 }
 
-void* PopFifoAuxBuffer(size_t size)
-{
-  void* ret = s_fifo_aux_read_ptr;
-  s_fifo_aux_read_ptr += size;
-  return ret;
-}
-
 // Description: RunGpuLoop() sends data through this function.
 static void ReadDataFromFifo(u32 readPtr)
 {
@@ -219,40 +212,6 @@ static void ReadDataFromFifo(u32 readPtr)
   // Copy new video instructions to s_video_buffer for future use in rendering the new picture
   Memory::CopyFromEmu(s_video_buffer_write_ptr, readPtr, GPFifo::GATHER_PIPE_SIZE);
   s_video_buffer_write_ptr += GPFifo::GATHER_PIPE_SIZE;
-}
-
-// The deterministic_gpu_thread version.
-static void ReadDataFromFifoOnCPU(u32 readPtr)
-{
-  u8* write_ptr = s_video_buffer_write_ptr;
-  if (GPFifo::GATHER_PIPE_SIZE > static_cast<size_t>(s_video_buffer + FIFO_SIZE - write_ptr))
-  {
-    // We can't wrap around while the GPU is working on the data.
-    if (!s_gpu_mainloop.IsRunning())
-    {
-      // GPU is shutting down, so the next asserts may fail
-      return;
-    }
-
-    if (s_video_buffer_pp_read_ptr != s_video_buffer_read_ptr)
-    {
-      PanicAlertFmt("Desynced read pointers");
-      return;
-    }
-    write_ptr = s_video_buffer_write_ptr;
-    const size_t existing_len = write_ptr - s_video_buffer_pp_read_ptr;
-    if (GPFifo::GATHER_PIPE_SIZE > static_cast<size_t>(FIFO_SIZE - existing_len))
-    {
-      PanicAlertFmt("FIFO out of bounds (existing {} + new {} > {})", existing_len,
-                    GPFifo::GATHER_PIPE_SIZE, FIFO_SIZE);
-      return;
-    }
-  }
-  Memory::CopyFromEmu(s_video_buffer_write_ptr, readPtr, GPFifo::GATHER_PIPE_SIZE);
-  s_video_buffer_pp_read_ptr = OpcodeDecoder::RunFifo<true>(
-      DataReader(s_video_buffer_pp_read_ptr, write_ptr + GPFifo::GATHER_PIPE_SIZE), nullptr);
-  // This would have to be locked if the GPU thread didn't spin.
-  s_video_buffer_write_ptr = write_ptr + GPFifo::GATHER_PIPE_SIZE;
 }
 
 void ResetVideoBuffer()
@@ -382,23 +341,8 @@ bool AtBreakpoint()
 
 void RunGpu()
 {
-  const bool is_dual_core = Core::System::GetInstance().IsDualCoreMode();
-
-  // wake up GPU thread
-  if (is_dual_core)
-  {
-    s_gpu_mainloop.Wakeup();
-  }
-
-  // if the sync GPU callback is suspended, wake it up.
-  if (!is_dual_core || s_config_sync_gpu)
-  {
-    if (s_syncing_suspended)
-    {
-      s_syncing_suspended = false;
-      CoreTiming::ScheduleEvent(GPU_TIME_SLOT_SIZE, s_event_sync_gpu, GPU_TIME_SLOT_SIZE);
-    }
-  }
+    s_syncing_suspended = false;
+    CoreTiming::ScheduleEvent(GPU_TIME_SLOT_SIZE, s_event_sync_gpu, GPU_TIME_SLOT_SIZE);
 }
 
 static int RunGpuOnCpu(int ticks)
@@ -454,48 +398,10 @@ static int RunGpuOnCpu(int ticks)
   return -available_ticks + GPU_TIME_SLOT_SIZE;
 }
 
-/* This function checks the emulated CPU - GPU distance and may wake up the GPU,
- * or block the CPU if required. It should be called by the CPU thread regularly.
- * @ticks The gone emulated CPU time.
- * @return A good time to call WaitForGpuThread() next.
- */
-static int WaitForGpuThread(int ticks)
-{
-  int old = s_sync_ticks.fetch_add(ticks);
-  int now = old + ticks;
-
-  // GPU is idle, so stop polling.
-  if (old >= 0 && s_gpu_mainloop.IsDone())
-    return -1;
-
-  // Wakeup GPU
-  if (old < s_config_sync_gpu_min_distance && now >= s_config_sync_gpu_min_distance)
-    RunGpu();
-
-  // If the GPU is still sleeping, wait for a longer time
-  if (now < s_config_sync_gpu_min_distance)
-    return GPU_TIME_SLOT_SIZE + s_config_sync_gpu_min_distance - now;
-
-  // Wait for GPU
-  if (now >= s_config_sync_gpu_max_distance)
-    s_sync_wakeup_event.Wait();
-
-  return GPU_TIME_SLOT_SIZE;
-}
-
 static void SyncGPUCallback(u64 ticks, s64 cyclesLate)
 {
   ticks += cyclesLate;
-  int next = -1;
-
-  if (!Core::System::GetInstance().IsDualCoreMode())
-  {
-    next = RunGpuOnCpu((int)ticks);
-  }
-  else if (s_config_sync_gpu)
-  {
-    next = WaitForGpuThread((int)ticks);
-  }
+  int next = RunGpuOnCpu((int)ticks);
 
   s_syncing_suspended = next < 0;
   if (!s_syncing_suspended)
@@ -504,10 +410,7 @@ static void SyncGPUCallback(u64 ticks, s64 cyclesLate)
 
 void SyncGPUForRegisterAccess()
 {
-  if (!Core::System::GetInstance().IsDualCoreMode())
-    RunGpuOnCpu(GPU_TIME_SLOT_SIZE);
-  else if (s_config_sync_gpu)
-    WaitForGpuThread(GPU_TIME_SLOT_SIZE);
+  RunGpuOnCpu(GPU_TIME_SLOT_SIZE);
 }
 
 // Initialize GPU - CPU thread syncing, this gives us a deterministic way to start the GPU thread.
@@ -516,4 +419,23 @@ void Prepare()
   s_event_sync_gpu = CoreTiming::RegisterEvent("SyncGPUCallback", SyncGPUCallback);
   s_syncing_suspended = true;
 }
+
+void FifoThread::Flush()
+{
+  if (m_write_chunk.IsEmpty())
+    return;
+
+  FifoChunk new_chunk;
+  m_reuse_queue.Pop(new_chunk);
+  new_chunk.Reset();
+  FifoChunk submit_chunk = std::exchange(m_write_chunk, new_chunk);
+  m_submit_queue.Push(submit_chunk);
+}
+
+void FifoThread::CopyFrom(const u8 *src, u32 length)
+{
+  m_write_chunk.CopyFrom(src, length);
+}
+
+
 }  // namespace Fifo
