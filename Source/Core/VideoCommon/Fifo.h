@@ -93,6 +93,7 @@ struct FifoChunk
       data.clear();
       memory_offsets.clear();
       aux_data.clear();
+      fifo_entries.clear();
       fifo_index = 0;
       pull_requests_before_execution = false;
     }
@@ -112,11 +113,11 @@ struct FifoChunk
 
       // Pad for SIMD overreads
       u32 aligned_end = Common::AlignUp(offset + length + 4, 8);
-      if (aligned_end > data.capacity()) [[unlikely]]
+      if (aligned_end > data.size()) [[unlikely]]
         data.resize(aligned_end);
 
       memcpy(data.data() + offset, src, length);
-      memset(data.data() + offset + length, 0, aligned_end - offset + length);
+      memset(data.data() + offset + length, 0, aligned_end - (offset + length));
     }
 
     void CopyAuxData(u32 guest_address, const u8* src, u32 length)
@@ -124,14 +125,14 @@ struct FifoChunk
       ADDSTAT(g_stats.this_frame.aux_data_copied, length);
       u32 offset = Common::AlignUp(aux_data.size(), 8);
       u32 aligned_end = Common::AlignUp(offset + length, 8);
-      if (aligned_end > aux_data.capacity()) [[unlikely]]
+      if (aligned_end > aux_data.size()) [[unlikely]]
         aux_data.resize(aligned_end);
 
       memcpy(aux_data.data() + offset, src, length);
 
       // zero the padding
       if (aligned_end - offset + length) [[likely]]
-        memset(aux_data.data() + offset + length, 0, aligned_end - offset + length);
+        memset(aux_data.data() + offset + length, 0, aligned_end - (offset + length));
 
       memory_offsets.insert(std::make_pair(guest_address, offset));
     }
