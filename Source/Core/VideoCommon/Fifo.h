@@ -40,9 +40,8 @@ enum class SyncGPUReason
 // In dual core mode, this synchronizes with the GPU thread.
 void SyncGPUForRegisterAccess();
 
-void FlushGpu();
+void WakeGPU();
 void RunGpu();
-void GpuMaySleep();
 void RunGpuLoop();
 void ExitGpuLoop();
 void EmulatorState(bool running);

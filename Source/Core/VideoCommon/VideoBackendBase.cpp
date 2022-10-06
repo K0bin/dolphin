@@ -294,10 +294,6 @@ void VideoBackendBase::DoState(PointerWrap& p)
   ev.do_save_state.p = &p;
   ev.type = AsyncRequests::Event::DO_SAVE_STATE;
   AsyncRequests::GetInstance()->PushEvent(ev, true);
-
-  // Let the GPU thread sleep after loading the state, so we're not spinning if paused after loading
-  // a state. The next GP burst will wake it up again.
-  Fifo::GpuMaySleep();
 }
 
 void VideoBackendBase::InitializeShared()

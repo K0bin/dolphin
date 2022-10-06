@@ -493,7 +493,6 @@ void SetCpControlRegister()
   if (fifo.bFF_GPReadEnable.load(std::memory_order_relaxed) && !m_CPCtrlReg.GPReadEnable)
   {
     fifo.bFF_GPReadEnable.store(m_CPCtrlReg.GPReadEnable, std::memory_order_relaxed);
-    Fifo::FlushGpu();
   }
   else
   {
