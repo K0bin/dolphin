@@ -11,6 +11,7 @@
 #include "Common/SPSCQueue.h"
 #include "Core/HW/GPFifo.h"
 #include "VideoCommon/DataReader.h"
+#include "Statistics.h"
 
 class PointerWrap;
 
@@ -81,18 +82,18 @@ struct FifoChunk
 
     void PushFifoData(const u8* src, u32 length)
     {
+      ADDSTAT(g_stats.this_frame.fifo_data_copied, length);
       DEBUG_ASSERT(data.empty());
-
-      //WARN_LOG_FMT(VIDEO, "pusing {} bytes fifo data", length);
 
       // Pad for SIMD overreads
       data.resize(length + 4);
+      data.resize(length);
       memcpy(data.data(), src, length);
     }
 
     void CopyAuxData(u32 guest_address, const u8* src, u32 length)
     {
-      WARN_LOG_FMT(VIDEO, "copy aux addr for {} len: {}", guest_address, length);
+      ADDSTAT(g_stats.this_frame.aux_data_copied, length);
       u32 old_size = aux_data.size();
       aux_data.resize(aux_data.size() + length);
       memcpy(aux_data.data() + old_size, src, length);
@@ -102,12 +103,8 @@ struct FifoChunk
     u8* AuxData(u32 guest_address)
     {
       auto iter = memory_offsets.find(guest_address);
-      if (iter == memory_offsets.end()) [[unlikely]] {
-        WARN_LOG_FMT(VIDEO, "Aux addr for {}: {}", guest_address, 0);
+      if (iter == memory_offsets.end()) [[unlikely]]
         return nullptr;
-      }
-
-      WARN_LOG_FMT(VIDEO, "Aux addr for {}: {}", guest_address, u64(aux_data.data() + iter->second));
 
       DEBUG_ASSERT(aux_data.size() > iter->second);
 
@@ -157,8 +154,8 @@ private:
   FifoChunk m_write_chunk;
   FifoChunk m_read_chunk;
 
-  Common::SPSCQueue<FifoChunk, false> m_submit_queue;
-  Common::SPSCQueue<FifoChunk, false> m_reuse_queue;
+  Common::SPSCQueue<FifoChunk, true> m_submit_queue;
+  Common::SPSCQueue<FifoChunk, true> m_reuse_queue;
 };
 
 extern FifoThreadContext g_fifo_thread;

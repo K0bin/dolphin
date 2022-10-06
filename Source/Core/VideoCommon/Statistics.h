@@ -20,6 +20,7 @@ struct Statistics
   int num_textures_alive;
 
   int num_vertex_loaders;
+  int num_fifo_chunks = 0;
 
   std::array<float, 6> proj;
   std::array<float, 16> gproj;
@@ -75,6 +76,9 @@ struct Statistics
     int num_draw_done;
     int num_token;
     int num_token_int;
+
+    int fifo_data_copied;
+    int aux_data_copied;
   };
   ThisFrame this_frame;
   void ResetFrame();

@@ -41,11 +41,6 @@ static Common::BlockingLoop s_gpu_mainloop;
 
 static Common::Flag s_emu_running_state;
 
-// Most of this array is unlikely to be faulted in...
-static u8 s_fifo_aux_data[FIFO_SIZE];
-static u8* s_fifo_aux_write_ptr;
-static u8* s_fifo_aux_read_ptr;
-
 static CoreTiming::EventType* s_event_sync_gpu;
 
 // STATE_TO_SAVE
@@ -55,7 +50,6 @@ static std::atomic<u8*> s_video_buffer_write_ptr;
 
 static std::atomic<int> s_sync_ticks;
 static bool s_syncing_suspended;
-static Common::Event s_sync_wakeup_event;
 
 static std::optional<size_t> s_config_callback_id = std::nullopt;
 static float s_config_sync_gpu_overclock = 0.0f;
@@ -118,8 +112,6 @@ void Shutdown()
   s_video_buffer = nullptr;
   s_video_buffer_write_ptr = nullptr;
   s_video_buffer_read_ptr = nullptr;
-  s_fifo_aux_write_ptr = nullptr;
-  s_fifo_aux_read_ptr = nullptr;
 
   if (s_config_callback_id)
   {
@@ -176,8 +168,6 @@ void ResetVideoBuffer()
 {
   s_video_buffer_read_ptr = s_video_buffer;
   s_video_buffer_write_ptr = s_video_buffer;
-  s_fifo_aux_write_ptr = s_fifo_aux_data;
-  s_fifo_aux_read_ptr = s_fifo_aux_data;
 }
 
 // Description: Main FIFO update loop
@@ -196,22 +186,18 @@ void RunGpuLoop()
         if (!s_emu_running_state.IsSet())
           return;
 
-        if (g_fifo_thread.PopReadChunk())
+        while (g_fifo_thread.PopReadChunk())
         {
           u32 cycles = 0;
           OpcodeDecoder::RunFifo<false>(
                   g_fifo_thread.ReadChunk().FifoReader(), &cycles);
         }
 
-        if (g_fifo_thread.IsEmpty())
-        {
-          // The fifo is empty, and it's unlikely we will get any more work in the near future.
-          // Make sure VertexManager finishes drawing any primitives it has stored in its buffer.
-          g_vertex_manager->Flush();
-          g_framebuffer_manager->RefreshPeekCache();
-          AsyncRequests::GetInstance()->PullEvents();
-          s_gpu_mainloop.AllowSleep();
-        }
+        // The fifo is empty, and it's unlikely we will get any more work in the near future.
+        // Make sure VertexManager finishes drawing any primitives it has stored in its buffer.
+        g_vertex_manager->Flush();
+        g_framebuffer_manager->RefreshPeekCache();
+        AsyncRequests::GetInstance()->PullEvents();
       },
       100);
 
@@ -270,6 +256,8 @@ static int RunGpuOnCpu(int ticks)
       s_video_buffer_read_ptr = OpcodeDecoder::RunFifo<true>(
               DataReader(s_video_buffer_read_ptr, s_video_buffer_write_ptr), &cycles);
       g_fifo_thread.WriteChunk().PushFifoData(start_ptr, s_video_buffer_write_ptr - start_ptr);
+      g_fifo_thread.Flush();
+      s_gpu_mainloop.Wakeup();
     }
     else
     {
@@ -301,12 +289,6 @@ static int RunGpuOnCpu(int ticks)
 
   // Discard all available ticks as there is nothing to do any more.
   s_sync_ticks.store(std::min(available_ticks, 0));
-
-  if (Core::System::GetInstance().IsDualCoreMode())
-  {
-    g_fifo_thread.Flush();
-    s_gpu_mainloop.Wakeup();
-  }
 
   // If the GPU is idle, drop the handler.
   if (available_ticks >= 0)
@@ -340,11 +322,16 @@ void Prepare()
 
 void FifoThreadContext::Flush()
 {
+  // TODO: synchronize at some point, so we're not running too far ahead.
+
   if (m_write_chunk.IsEmpty())
     return;
 
   FifoChunk new_chunk;
-  m_reuse_queue.Pop(new_chunk);
+  if (!m_reuse_queue.Pop(new_chunk)) {
+    INCSTAT(g_stats.num_fifo_chunks);
+  }
+
   new_chunk.Reset();
   FifoChunk submit_chunk = std::exchange(m_write_chunk, std::move(new_chunk));
   m_submit_queue.Push(std::move(submit_chunk));

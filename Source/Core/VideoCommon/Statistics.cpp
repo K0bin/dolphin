@@ -95,6 +95,9 @@ void Statistics::Display() const
   draw_statistic("EFB pokes:", "%d", this_frame.num_efb_pokes);
   draw_statistic("Draw dones:", "%d", this_frame.num_draw_done);
   draw_statistic("Tokens:", "%d/%d", this_frame.num_token, this_frame.num_token_int);
+  draw_statistic("FIFO data copied (KiB):", "%d", this_frame.fifo_data_copied >> 10);
+  draw_statistic("AUX data copied (KiB):", "%d", this_frame.aux_data_copied >> 10);
+  draw_statistic("FIFO chunks:", "%d", num_fifo_chunks);
 
   ImGui::Columns(1);
 
