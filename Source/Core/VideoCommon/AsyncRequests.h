@@ -89,6 +89,7 @@ public:
   void WaitForEmptyQueue();
   void SetEnable(bool enable);
   void SetPassthrough(bool enable);
+  bool IsQueueEmpty();
 
   static AsyncRequests* GetInstance() { return &s_singleton; }
 

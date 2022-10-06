@@ -177,3 +177,9 @@ void AsyncRequests::SetPassthrough(bool enable)
   std::unique_lock<std::mutex> lock(m_mutex);
   m_passthrough = enable;
 }
+
+bool AsyncRequests::IsQueueEmpty()
+{
+  std::unique_lock<std::mutex> lock(m_mutex);
+  return m_queue.empty();
+}

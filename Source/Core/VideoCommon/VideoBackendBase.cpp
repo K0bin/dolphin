@@ -100,7 +100,7 @@ void VideoBackendBase::Video_OutputXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride
     e.swap_event.fbWidth = fb_width;
     e.swap_event.fbStride = fb_stride;
     e.swap_event.fbHeight = fb_height;
-    AsyncRequests::GetInstance()->PushEvent(e, false);
+    AsyncRequests::GetInstance()->PushEvent(e, true);
   }
 }
 

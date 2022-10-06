@@ -179,15 +179,18 @@ void RunGpuLoop()
 
   s_gpu_mainloop.Run(
       [] {
-        // Run events from the CPU thread.
-        AsyncRequests::GetInstance()->PullEvents();
-
         // Do nothing while paused
         if (!s_emu_running_state.IsSet())
           return;
 
-        if (g_fifo_thread.PopReadChunk())
+        while (g_fifo_thread.PopReadChunk())
         {
+          if (g_fifo_thread.ReadChunk().PullAsyncRequestsBefore())
+          {
+            // Run events from the CPU thread.
+            AsyncRequests::GetInstance()->PullEvents();
+          }
+
           u32 cycles = 0;
           DataReader reader;
           do {
@@ -291,6 +294,9 @@ static int RunGpuOnCpu(int ticks)
 
   if (Core::System::GetInstance().IsDualCoreMode())
   {
+    if (!AsyncRequests::GetInstance()->IsQueueEmpty())
+      g_fifo_thread.WriteChunk().MarkNeedsAsyncRequestsPull();
+
     g_fifo_thread.Flush();
     s_gpu_mainloop.Wakeup();
   }

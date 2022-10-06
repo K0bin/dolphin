@@ -62,6 +62,7 @@ struct FifoChunk
     std::vector<u8> aux_data;
     std::vector<FifoEntry> fifo_entries;
     u32 fifo_index = 0;
+    bool pull_requests_before_execution = false;
 
     FifoChunk() = default;
 
@@ -74,6 +75,7 @@ struct FifoChunk
       aux_data = std::move(other.aux_data);
       fifo_entries = std::move(other.fifo_entries);
       fifo_index = other.fifo_index;
+      pull_requests_before_execution = other.pull_requests_before_execution;
     }
 
     FifoChunk& operator = (FifoChunk&& other) noexcept
@@ -83,6 +85,7 @@ struct FifoChunk
       aux_data = std::move(other.aux_data);
       fifo_entries = std::move(other.fifo_entries);
       fifo_index = other.fifo_index;
+      pull_requests_before_execution = other.pull_requests_before_execution;
       return *this;
     }
 
@@ -92,6 +95,7 @@ struct FifoChunk
       memory_offsets.clear();
       aux_data.clear();
       fifo_index = 0;
+      pull_requests_before_execution = false;
     }
 
     void PushFifoData(const u8* src, u32 length)
@@ -147,6 +151,16 @@ struct FifoChunk
     bool IsEmpty() const
     {
       return data.empty();
+    }
+
+    bool PullAsyncRequestsBefore() const
+    {
+      return pull_requests_before_execution;
+    }
+
+    void MarkNeedsAsyncRequestsPull()
+    {
+      pull_requests_before_execution = true;
     }
 
     DataReader NextFifoReader()
