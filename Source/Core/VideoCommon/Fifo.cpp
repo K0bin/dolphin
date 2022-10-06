@@ -186,11 +186,15 @@ void RunGpuLoop()
         if (!s_emu_running_state.IsSet())
           return;
 
-        while (g_fifo_thread.PopReadChunk())
+        if (g_fifo_thread.PopReadChunk())
         {
           u32 cycles = 0;
-          OpcodeDecoder::RunFifo<false>(
-                  g_fifo_thread.ReadChunk().FifoReader(), &cycles);
+          DataReader reader;
+          do {
+            reader = g_fifo_thread.ReadChunk().NextFifoReader();
+            OpcodeDecoder::RunFifo<false>(
+                    reader, &cycles);
+          } while (reader.size() != 0);
         }
 
         // The fifo is empty, and it's unlikely we will get any more work in the near future.
@@ -256,8 +260,6 @@ static int RunGpuOnCpu(int ticks)
       s_video_buffer_read_ptr = OpcodeDecoder::RunFifo<true>(
               DataReader(s_video_buffer_read_ptr, s_video_buffer_write_ptr), &cycles);
       g_fifo_thread.WriteChunk().PushFifoData(start_ptr, s_video_buffer_write_ptr - start_ptr);
-      g_fifo_thread.Flush();
-      s_gpu_mainloop.Wakeup();
     }
     else
     {
@@ -285,6 +287,12 @@ static int RunGpuOnCpu(int ticks)
   if (reset_simd_state)
   {
     FPURoundMode::LoadSIMDState();
+  }
+
+  if (Core::System::GetInstance().IsDualCoreMode())
+  {
+    g_fifo_thread.Flush();
+    s_gpu_mainloop.Wakeup();
   }
 
   // Discard all available ticks as there is nothing to do any more.

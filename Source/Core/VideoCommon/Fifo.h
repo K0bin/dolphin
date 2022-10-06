@@ -12,6 +12,7 @@
 #include "Core/HW/GPFifo.h"
 #include "VideoCommon/DataReader.h"
 #include "Statistics.h"
+#include "Common/Align.h"
 
 class PointerWrap;
 
@@ -48,11 +49,19 @@ void EmulatorState(bool running);
 bool AtBreakpoint();
 void ResetVideoBuffer();
 
+struct FifoEntry {
+    u32 start;
+    u32 length;
+};
+
+// One FifoChunk is equivalent to one invocation of RunGPUonCPU
 struct FifoChunk
 {
     std::vector<u8> data;
     std::unordered_map<u32, u32> memory_offsets;
     std::vector<u8> aux_data;
+    std::vector<FifoEntry> fifo_entries;
+    u32 fifo_index = 0;
 
     FifoChunk() = default;
 
@@ -63,6 +72,8 @@ struct FifoChunk
       data = std::move(other.data);
       memory_offsets = std::move(other.memory_offsets);
       aux_data = std::move(other.aux_data);
+      fifo_entries = std::move(other.fifo_entries);
+      fifo_index = other.fifo_index;
     }
 
     FifoChunk& operator = (FifoChunk&& other) noexcept
@@ -70,6 +81,8 @@ struct FifoChunk
       data = std::move(other.data);
       memory_offsets = std::move(other.memory_offsets);
       aux_data = std::move(other.aux_data);
+      fifo_entries = std::move(other.fifo_entries);
+      fifo_index = other.fifo_index;
       return *this;
     }
 
@@ -78,26 +91,36 @@ struct FifoChunk
       data.clear();
       memory_offsets.clear();
       aux_data.clear();
+      fifo_index = 0;
     }
 
     void PushFifoData(const u8* src, u32 length)
     {
       ADDSTAT(g_stats.this_frame.fifo_data_copied, length);
-      DEBUG_ASSERT(data.empty());
+
+      u32 offset = 0;
+      if (!fifo_entries.empty())
+      {
+        const FifoEntry& last = fifo_entries.back();
+        offset = Common::AlignUp(last.start + last.length + 4, 8);
+      }
+
+      fifo_entries.push_back(FifoEntry{static_cast<u32>(offset), length});
 
       // Pad for SIMD overreads
-      data.resize(length + 4);
-      data.resize(length);
-      memcpy(data.data(), src, length);
+      u32 aligned_end = Common::AlignUp(offset + length + 4, 8);
+      data.resize(aligned_end);
+      memcpy(data.data() + offset, src, length);
     }
 
     void CopyAuxData(u32 guest_address, const u8* src, u32 length)
     {
       ADDSTAT(g_stats.this_frame.aux_data_copied, length);
-      u32 old_size = aux_data.size();
-      aux_data.resize(aux_data.size() + length);
-      memcpy(aux_data.data() + old_size, src, length);
-      memory_offsets.insert(std::make_pair(guest_address, old_size));
+      u32 offset = Common::AlignUp(aux_data.size(), 8);
+      u32 aligned_end = Common::AlignUp(offset + length, 8);
+      aux_data.resize(aligned_end);
+      memcpy(aux_data.data() + offset, src, length);
+      memory_offsets.insert(std::make_pair(guest_address, offset));
     }
 
     u8* AuxData(u32 guest_address)
@@ -116,9 +139,13 @@ struct FifoChunk
       return data.empty();
     }
 
-    DataReader FifoReader()
+    DataReader NextFifoReader()
     {
-      return DataReader(data.data(), data.data() + data.size());
+      if (fifo_index >= fifo_entries.size())
+        return DataReader(nullptr, nullptr);
+
+      const FifoEntry& entry = fifo_entries[fifo_index++];
+      return DataReader(data.data() + entry.start, data.data() + entry.start + entry.length);
     }
 };
 
