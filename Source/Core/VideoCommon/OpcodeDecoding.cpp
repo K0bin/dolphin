@@ -28,7 +28,9 @@
 #include "VideoCommon/VertexLoaderManager.h"
 #include "VideoCommon/VertexShaderManager.h"
 #include "VideoCommon/XFMemory.h"
+#include "VideoCommon/Fifo.h"
 #include "VideoCommon/XFStructs.h"
+#include "Core/System.h"
 
 namespace OpcodeDecoder
 {
@@ -108,7 +110,7 @@ public:
   {
     m_cycles += 6;
 
-    if constexpr (!is_preprocess)
+    if constexpr (is_preprocess)
       PreprocessIndexedXF(array, index, address, size);
     else
       LoadIndexedXF(array, index, address, size);
@@ -148,7 +150,7 @@ public:
       {
         const u8* const start_address = Memory::GetPointer(address);
 
-        Fifo::PushFifoAuxBuffer(start_address, size);
+        Fifo::g_fifo_thread.WriteChunk().CopyAuxData(address, start_address, size);
 
         if (start_address != nullptr)
         {
@@ -159,7 +161,10 @@ public:
       {
         const u8* start_address;
 
-        start_address = Memory::GetPointer(address);
+        if (!Core::System::GetInstance().IsDualCoreMode())
+          start_address = Memory::GetPointer(address);
+        else
+          start_address = Fifo::g_fifo_thread.ReadChunk().AuxData(address);
 
         // Avoid the crash if Memory::GetPointer failed ..
         if (start_address != nullptr)

@@ -323,7 +323,6 @@ static void SetTokenFinish_OnMainThread(u64 userdata, s64 cyclesLate)
 
 // Raise the event handler above on the CPU thread.
 // s_token_finish_mutex must be locked.
-// THIS IS EXECUTED FROM VIDEO THREAD
 static void RaiseEvent(int cycles_into_future)
 {
   if (s_event_raised)
@@ -331,21 +330,14 @@ static void RaiseEvent(int cycles_into_future)
 
   s_event_raised = true;
 
-  CoreTiming::FromThread from = CoreTiming::FromThread::NON_CPU;
-  s64 cycles = 0;  // we don't care about timings for dual core mode.
-  if (!Core::System::GetInstance().IsDualCoreMode())
-  {
-    from = CoreTiming::FromThread::CPU;
-
-    // Hack: Dolphin's single-core gpu timings are way too fast. Enforce a minimum delay to give
-    //       games time to setup any interrupt state
-    cycles = std::max(500, cycles_into_future);
-  }
+  // Hack: Dolphin's gpu timings are way too fast. Enforce a minimum delay to give
+  //       games time to setup any interrupt state
+  s64 cycles = std::max(500, cycles_into_future);
+  CoreTiming::FromThread from = CoreTiming::FromThread::CPU;
   CoreTiming::ScheduleEvent(cycles, et_SetTokenFinishOnMainThread, 0, from);
 }
 
 // SetToken
-// THIS IS EXECUTED FROM VIDEO THREAD
 void SetToken(const u16 token, const bool interrupt, int cycles_into_future)
 {
   DEBUG_LOG_FMT(PIXELENGINE, "VIDEO Backend raises INT_CAUSE_PE_TOKEN (btw, token: {:04x})", token);
@@ -359,7 +351,6 @@ void SetToken(const u16 token, const bool interrupt, int cycles_into_future)
 }
 
 // SetFinish
-// THIS IS EXECUTED FROM VIDEO THREAD (BPStructs.cpp) when a new frame has been drawn
 void SetFinish(int cycles_into_future)
 {
   DEBUG_LOG_FMT(PIXELENGINE, "VIDEO Set Finish");

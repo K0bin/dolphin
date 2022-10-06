@@ -4,9 +4,13 @@
 #pragma once
 
 #include <cstddef>
+#include <vector>
+#include <unordered_map>
+#include "Common/Assert.h"
 #include "Common/CommonTypes.h"
 #include "Common/SPSCQueue.h"
 #include "Core/HW/GPFifo.h"
+#include "VideoCommon/DataReader.h"
 
 class PointerWrap;
 
@@ -34,8 +38,6 @@ enum class SyncGPUReason
 // In dual core mode, this synchronizes with the GPU thread.
 void SyncGPUForRegisterAccess();
 
-void PushFifoAuxBuffer(const void* ptr, size_t size);
-
 void FlushGpu();
 void RunGpu();
 void GpuMaySleep();
@@ -49,6 +51,7 @@ struct FifoChunk
 {
     std::vector<u8> data;
     std::unordered_map<u32, u32> memory_offsets;
+    std::vector<u8> aux_data;
 
     FifoChunk() = default;
 
@@ -58,12 +61,14 @@ struct FifoChunk
     {
       data = std::move(other.data);
       memory_offsets = std::move(other.memory_offsets);
+      aux_data = std::move(other.aux_data);
     }
 
     FifoChunk& operator = (FifoChunk&& other) noexcept
     {
       data = std::move(other.data);
       memory_offsets = std::move(other.memory_offsets);
+      aux_data = std::move(other.aux_data);
       return *this;
     }
 
@@ -71,25 +76,42 @@ struct FifoChunk
     {
       data.clear();
       memory_offsets.clear();
+      aux_data.clear();
     }
 
-    void CopyFrom(const u8* src, u32 length)
+    void PushFifoData(const u8* src, u32 length)
     {
-      u32 additional_capacity = length;
+      DEBUG_ASSERT(data.empty());
+
+      //WARN_LOG_FMT(VIDEO, "pusing {} bytes fifo data", length);
+
       // Pad for SIMD overreads
-      additional_capacity += 4;
+      data.resize(length + 4);
+      memcpy(data.data(), src, length);
+    }
 
-      if (data.capacity() >= data.size() + additional_capacity)
-        return;
+    void CopyAuxData(u32 guest_address, const u8* src, u32 length)
+    {
+      WARN_LOG_FMT(VIDEO, "copy aux addr for {} len: {}", guest_address, length);
+      u32 old_size = aux_data.size();
+      aux_data.resize(aux_data.size() + length);
+      memcpy(aux_data.data() + old_size, src, length);
+      memory_offsets.insert(std::make_pair(guest_address, old_size));
+    }
 
-      if (data.empty())
-        additional_capacity = std::max(GPFifo::GATHER_PIPE_SIZE * 32, additional_capacity);
+    u8* AuxData(u32 guest_address)
+    {
+      auto iter = memory_offsets.find(guest_address);
+      if (iter == memory_offsets.end()) [[unlikely]] {
+        WARN_LOG_FMT(VIDEO, "Aux addr for {}: {}", guest_address, 0);
+        return nullptr;
+      }
 
-      data.reserve(additional_capacity);
+      WARN_LOG_FMT(VIDEO, "Aux addr for {}: {}", guest_address, u64(aux_data.data() + iter->second));
 
-      u32 old_size = data.size();
-      data.resize(data.size() + length);
-      memcpy(data.data() + old_size, src, length);
+      DEBUG_ASSERT(aux_data.size() > iter->second);
+
+      return aux_data.data() + iter->second;
     }
 
     bool IsEmpty() const
@@ -97,39 +119,48 @@ struct FifoChunk
       return data.empty();
     }
 
-    u32 Length() const
+    DataReader FifoReader()
     {
-      return data.size();
-    }
-
-    u8* Ptr()
-    {
-      return data.data();
+      return DataReader(data.data(), data.data() + data.size());
     }
 };
 
-class FifoThread
+class FifoThreadContext
 {
 public:
   void Flush();
-  void CopyFrom(const u8* src, u32 length);
+
   bool IsEmpty() const
   {
     return m_submit_queue.Empty();
   }
 
-  bool Pop(FifoChunk& chunk)
+  bool PopReadChunk()
   {
-    return m_submit_queue.Pop(chunk);
+    if (!m_read_chunk.IsEmpty()) [[likely]]
+      m_reuse_queue.Push(std::move(m_read_chunk));
+
+    return m_submit_queue.Pop(m_read_chunk);
+  }
+
+  FifoChunk& WriteChunk()
+  {
+    return m_write_chunk;
+  }
+
+  FifoChunk& ReadChunk()
+  {
+    return m_read_chunk;
   }
 
 private:
   FifoChunk m_write_chunk;
+  FifoChunk m_read_chunk;
 
   Common::SPSCQueue<FifoChunk, false> m_submit_queue;
   Common::SPSCQueue<FifoChunk, false> m_reuse_queue;
 };
 
-extern FifoThread g_fifo_thread;
+extern FifoThreadContext g_fifo_thread;
 
 }  // namespace Fifo

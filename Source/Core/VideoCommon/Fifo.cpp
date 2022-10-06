@@ -150,27 +150,6 @@ void EmulatorState(bool running)
     s_gpu_mainloop.AllowSleep();
 }
 
-void PushFifoAuxBuffer(const void* ptr, size_t size)
-{
-  if (size > (size_t)(s_fifo_aux_data + FIFO_SIZE - s_fifo_aux_write_ptr))
-  {
-    if (!s_gpu_mainloop.IsRunning())
-    {
-      // GPU is shutting down
-      return;
-    }
-    if (size > (size_t)(s_fifo_aux_data + FIFO_SIZE - s_fifo_aux_write_ptr))
-    {
-      // That will sync us up to the last 32 bytes, so this short region
-      // of FIFO would have to point to a 2MB display list or something.
-      PanicAlertFmt("Absurdly large aux buffer");
-      return;
-    }
-  }
-  memcpy(s_fifo_aux_write_ptr, ptr, size);
-  s_fifo_aux_write_ptr += size;
-}
-
 // Description: RunGpuLoop() sends data through this function.
 static void ReadDataFromFifo(u32 readPtr)
 {
@@ -217,11 +196,22 @@ void RunGpuLoop()
         if (!s_emu_running_state.IsSet())
           return;
 
-        // The fifo is empty and it's unlikely we will get any more work in the near future.
-        // Make sure VertexManager finishes drawing any primitives it has stored in it's buffer.
-        g_vertex_manager->Flush();
-        g_framebuffer_manager->RefreshPeekCache();
-        AsyncRequests::GetInstance()->PullEvents();
+        if (g_fifo_thread.PopReadChunk())
+        {
+          u32 cycles = 0;
+          OpcodeDecoder::RunFifo<false>(
+                  g_fifo_thread.ReadChunk().FifoReader(), &cycles);
+        }
+
+        if (g_fifo_thread.IsEmpty())
+        {
+          // The fifo is empty, and it's unlikely we will get any more work in the near future.
+          // Make sure VertexManager finishes drawing any primitives it has stored in its buffer.
+          g_vertex_manager->Flush();
+          g_framebuffer_manager->RefreshPeekCache();
+          AsyncRequests::GetInstance()->PullEvents();
+          s_gpu_mainloop.AllowSleep();
+        }
       },
       100);
 
@@ -276,9 +266,10 @@ static int RunGpuOnCpu(int ticks)
     if (Core::System::GetInstance().IsDualCoreMode())
     {
       // Send FIFO to data to the worker and run preprocess
-      g_fifo_thread.CopyFrom(s_video_buffer_read_ptr, s_video_buffer_write_ptr - s_video_buffer_read_ptr);
+      u8* start_ptr = s_video_buffer_read_ptr;
       s_video_buffer_read_ptr = OpcodeDecoder::RunFifo<true>(
               DataReader(s_video_buffer_read_ptr, s_video_buffer_write_ptr), &cycles);
+      g_fifo_thread.WriteChunk().PushFifoData(start_ptr, s_video_buffer_write_ptr - start_ptr);
     }
     else
     {
@@ -314,6 +305,7 @@ static int RunGpuOnCpu(int ticks)
   if (Core::System::GetInstance().IsDualCoreMode())
   {
     g_fifo_thread.Flush();
+    s_gpu_mainloop.Wakeup();
   }
 
   // If the GPU is idle, drop the handler.
@@ -346,7 +338,7 @@ void Prepare()
   s_syncing_suspended = true;
 }
 
-void FifoThread::Flush()
+void FifoThreadContext::Flush()
 {
   if (m_write_chunk.IsEmpty())
     return;
@@ -354,15 +346,10 @@ void FifoThread::Flush()
   FifoChunk new_chunk;
   m_reuse_queue.Pop(new_chunk);
   new_chunk.Reset();
-  FifoChunk submit_chunk = std::exchange(m_write_chunk, new_chunk);
-  m_submit_queue.Push(submit_chunk);
+  FifoChunk submit_chunk = std::exchange(m_write_chunk, std::move(new_chunk));
+  m_submit_queue.Push(std::move(submit_chunk));
 }
 
-void FifoThread::CopyFrom(const u8 *src, u32 length)
-{
-  m_write_chunk.CopyFrom(src, length);
-}
-
-FifoThread g_fifo_thread;
+FifoThreadContext g_fifo_thread;
 
 }  // namespace Fifo
