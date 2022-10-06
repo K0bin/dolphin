@@ -5,6 +5,8 @@
 
 #include <cstddef>
 #include <vector>
+#include <queue>
+#include <mutex>
 #include <unordered_map>
 #include "Common/Assert.h"
 #include "Common/CommonTypes.h"
@@ -40,13 +42,15 @@ enum class SyncGPUReason
 // In dual core mode, this synchronizes with the GPU thread.
 void SyncGPUForRegisterAccess();
 
-void WakeGPU();
+void WakeGPUThread();
 void RunGpu();
 void RunGpuLoop();
 void ExitGpuLoop();
 void EmulatorState(bool running);
 bool AtBreakpoint();
 void ResetVideoBuffer();
+void FlushGPUThread();
+void WaitGPUThread();
 
 struct FifoEntry {
     u32 start;
@@ -54,18 +58,9 @@ struct FifoEntry {
 };
 
 // One FifoChunk is equivalent to one invocation of RunGPUonCPU
-struct FifoChunk
+class FifoChunk
 {
-    u8* data  = nullptr;
-    u32 data_capacity = 0;
-    u8* aux_data = nullptr;
-    u32 aux_data_capacity = 0;
-    u32 aux_data_length = 0;
-    std::unordered_map<u32, u32> memory_offsets;
-    std::vector<FifoEntry> fifo_entries;
-    u32 fifo_index = 0;
-    bool pull_requests_before_execution = false;
-
+public:
     FifoChunk() = default;
 
     FifoChunk(const FifoChunk& other) = delete;
@@ -94,6 +89,8 @@ struct FifoChunk
       other.pull_requests_before_execution = false;
       aux_data_length = other.aux_data_length;
       other.aux_data_length = 0;
+      has_sync = other.has_sync;
+      other.has_sync = false;
     }
 
     FifoChunk& operator = (FifoChunk&& other) noexcept
@@ -114,6 +111,8 @@ struct FifoChunk
       other.pull_requests_before_execution = false;
       aux_data_length = other.aux_data_length;
       other.aux_data_length = 0;
+      has_sync = other.has_sync;
+      other.has_sync = false;
       return *this;
     }
 
@@ -124,6 +123,7 @@ struct FifoChunk
       fifo_index = 0;
       aux_data_length = 0;
       pull_requests_before_execution = false;
+      has_sync = false;
     }
 
     void PushFifoData(const u8* src, u32 length)
@@ -198,6 +198,11 @@ struct FifoChunk
       pull_requests_before_execution = true;
     }
 
+    void MarkHasSync()
+    {
+      has_sync = true;
+    }
+
     DataReader NextFifoReader()
     {
       if (fifo_index >= fifo_entries.size())
@@ -206,24 +211,59 @@ struct FifoChunk
       const FifoEntry& entry = fifo_entries[fifo_index++];
       return DataReader(data + entry.start, data + entry.start + entry.length);
     }
+
+    bool ShouldFlush() const
+    {
+      return true;
+      //return fifo_entries.size() >= 128 || aux_data_length >= 512 || has_sync;
+    }
+
+private:
+    u8* data  = nullptr;
+    u32 data_capacity = 0;
+    u8* aux_data = nullptr;
+    u32 aux_data_capacity = 0;
+    u32 aux_data_length = 0;
+    std::unordered_map<u32, u32> memory_offsets;
+    std::vector<FifoEntry> fifo_entries;
+    u32 fifo_index = 0;
+    bool pull_requests_before_execution = false;
+    bool has_sync = false;
 };
 
 class FifoThreadContext
 {
 public:
   void Flush();
+  bool FlushIfNecessary();
 
-  bool IsEmpty() const
+  bool IsEmpty()
   {
-    return m_submit_queue.Empty();
+    std::lock_guard lock(m_submit_mutex);
+    return m_submit_queue.empty();
   }
 
   bool PopReadChunk()
   {
     if (!m_read_chunk.IsEmpty()) [[likely]]
-      m_reuse_queue.Push(std::move(m_read_chunk));
+    {
+      std::lock_guard lock(m_free_list_mutex_b);
+      m_free_list_b.push_back(std::move(m_read_chunk));
+    }
 
-    return m_submit_queue.Pop(m_read_chunk);
+    std::lock_guard lock(m_submit_mutex);
+    if (m_submit_queue.empty())
+    {
+      std::lock_guard lock_b(m_submit_mutex_b);
+      std::swap(m_submit_queue, m_submit_queue_b);
+    }
+    if (!m_submit_queue.empty())
+    {
+      m_read_chunk = std::move(m_submit_queue.front());
+      m_submit_queue.pop();
+      return true;
+    }
+    return false;
   }
 
   FifoChunk& WriteChunk()
@@ -240,8 +280,16 @@ private:
   FifoChunk m_write_chunk;
   FifoChunk m_read_chunk;
 
-  Common::SPSCQueue<FifoChunk, true> m_submit_queue;
-  Common::SPSCQueue<FifoChunk, true> m_reuse_queue;
+  std::queue<FifoChunk> m_submit_queue;
+  std::queue<FifoChunk> m_submit_queue_b;
+  std::vector<FifoChunk> m_free_list;
+  std::vector<FifoChunk> m_free_list_b;
+
+  std::mutex m_submit_mutex;
+  std::mutex m_submit_mutex_b;
+  std::mutex m_free_list_mutex;
+  std::mutex m_free_list_mutex_b;
+
 };
 
 extern FifoThreadContext g_fifo_thread;

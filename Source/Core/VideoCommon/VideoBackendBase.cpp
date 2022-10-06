@@ -93,14 +93,16 @@ void VideoBackendBase::Video_OutputXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride
   if (m_initialized && g_renderer && !g_ActiveConfig.bImmediateXFB)
   {
     AsyncRequests::Event e;
-    e.time = ticks;
-    e.type = AsyncRequests::Event::SWAP_EVENT;
+    e.time = 0;
+    e.type = AsyncRequests::Event::SYNC_EVENT;
+    AsyncRequests::GetInstance()->PushEvent(e, true);
 
+    e.type = AsyncRequests::Event::SWAP_EVENT;
     e.swap_event.xfbAddr = xfb_addr;
     e.swap_event.fbWidth = fb_width;
     e.swap_event.fbStride = fb_stride;
     e.swap_event.fbHeight = fb_height;
-    AsyncRequests::GetInstance()->PushEvent(e, true);
+    AsyncRequests::GetInstance()->PushEvent(e, false);
   }
 }
 

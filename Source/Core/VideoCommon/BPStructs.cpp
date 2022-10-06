@@ -741,13 +741,18 @@ void LoadBPRegPreprocess(u8 reg, u32 value, int cycles_into_future)
   {
   case BPMEM_SETDRAWDONE:
     if ((newval & 0xff) == 0x02)
+    {
       PixelEngine::SetFinish(cycles_into_future);
+      Fifo::g_fifo_thread.WriteChunk().MarkHasSync();
+    }
     break;
   case BPMEM_PE_TOKEN_ID:
     PixelEngine::SetToken(newval & 0xffff, false, cycles_into_future);
+    Fifo::g_fifo_thread.WriteChunk().MarkHasSync();
     break;
   case BPMEM_PE_TOKEN_INT_ID:  // Pixel Engine Interrupt Token ID
     PixelEngine::SetToken(newval & 0xffff, true, cycles_into_future);
+    Fifo::g_fifo_thread.WriteChunk().MarkHasSync();
     break;
   }
 }

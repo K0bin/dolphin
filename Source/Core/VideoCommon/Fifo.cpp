@@ -227,13 +227,34 @@ void RunGpu()
     CoreTiming::ScheduleEvent(GPU_TIME_SLOT_SIZE, s_event_sync_gpu, GPU_TIME_SLOT_SIZE);
 }
 
-void WakeGPU()
+void WakeGPUThread()
 {
+  if (!Core::System::GetInstance().IsDualCoreMode())
+    return;
+
   s_gpu_mainloop.Wakeup();
+}
+
+void FlushGPUThread()
+{
+  if (!Core::System::GetInstance().IsDualCoreMode())
+    return;
+
+  g_fifo_thread.Flush();
+}
+
+void WaitGPUThread()
+{
+  if (!Core::System::GetInstance().IsDualCoreMode())
+    return;
+
+  FlushGPUThread();
+  s_gpu_mainloop.Wait();
 }
 
 static int RunGpuOnCpu(int ticks)
 {
+  bool has_remaining_async_events = AsyncRequests::GetInstance()->IsQueueEmpty();
   CommandProcessor::SCPFifoStruct& fifo = CommandProcessor::fifo;
   bool reset_simd_state = false;
   int available_ticks = int(ticks * s_config_sync_gpu_overclock) + s_sync_ticks.load();
@@ -287,11 +308,10 @@ static int RunGpuOnCpu(int ticks)
 
   if (Core::System::GetInstance().IsDualCoreMode())
   {
-    if (!AsyncRequests::GetInstance()->IsQueueEmpty())
+    if (has_remaining_async_events)
       g_fifo_thread.WriteChunk().MarkNeedsAsyncRequestsPull();
 
-    g_fifo_thread.Flush();
-    s_gpu_mainloop.Wakeup();
+    g_fifo_thread.FlushIfNecessary();
   }
 
   // Discard all available ticks as there is nothing to do any more.
@@ -329,19 +349,47 @@ void Prepare()
 
 void FifoThreadContext::Flush()
 {
-  // TODO: synchronize at some point, so we're not running too far ahead.
-
   if (m_write_chunk.IsEmpty())
     return;
 
   FifoChunk new_chunk;
-  if (!m_reuse_queue.Pop(new_chunk)) {
-    INCSTAT(g_stats.num_fifo_chunks);
+  {
+    std::lock_guard free_list_lock(m_free_list_mutex);
+
+    if (m_free_list.empty()) [[unlikely]]
+    {
+      std::lock_guard free_list_b_lock(m_free_list_mutex_b);
+      std::swap(m_free_list, m_free_list_b);
+    }
+
+    if (!m_free_list.empty()) [[likely]]
+    {
+      new_chunk = std::move(m_free_list.back());
+      m_free_list.pop_back();
+    }
+    else
+    {
+      INCSTAT(g_stats.num_fifo_chunks);
+    }
   }
 
   new_chunk.Reset();
   FifoChunk submit_chunk = std::exchange(m_write_chunk, std::move(new_chunk));
-  m_submit_queue.Push(std::move(submit_chunk));
+
+  std::lock_guard submit_lock(m_submit_mutex_b);
+  m_submit_queue_b.push(std::move(submit_chunk));
+
+  WakeGPUThread();
+}
+
+bool FifoThreadContext::FlushIfNecessary()
+{
+  if (m_write_chunk.ShouldFlush())
+  {
+    Flush();
+    return true;
+  }
+  return false;
 }
 
 FifoThreadContext g_fifo_thread;

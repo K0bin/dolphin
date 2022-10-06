@@ -74,27 +74,33 @@ void AsyncRequests::PullEventsInternal()
 
 void AsyncRequests::PushEvent(const AsyncRequests::Event& event, bool blocking)
 {
-  std::unique_lock<std::mutex> lock(m_mutex);
-
-  if (m_passthrough)
   {
-    HandleEvent(event);
-    return;
+    std::unique_lock<std::mutex> lock(m_mutex);
+
+    if (m_passthrough) {
+      HandleEvent(event);
+      return;
+    }
+
+    m_empty.Clear();
+    m_wake_me_up_again |= blocking;
+
+    if (!m_enable)
+      return;
+
+    if (blocking)
+      Fifo::FlushGPUThread();
+
+    m_queue.push(event);
+
+    Fifo::WakeGPUThread();
+
+    if (blocking) {
+      m_cond.wait(lock, [this] { return m_queue.empty(); });
+    }
   }
-
-  m_empty.Clear();
-  m_wake_me_up_again |= blocking;
-
-  if (!m_enable)
-    return;
-
-  m_queue.push(event);
-
-  Fifo::WakeGPU();
   if (blocking)
-  {
-    m_cond.wait(lock, [this] { return m_queue.empty(); });
-  }
+    Fifo::WaitGPUThread();
 }
 
 void AsyncRequests::WaitForEmptyQueue()
@@ -169,6 +175,10 @@ void AsyncRequests::HandleEvent(const AsyncRequests::Event& e)
   case Event::DO_SAVE_STATE:
     VideoCommon_DoState(*e.do_save_state.p);
     break;
+
+  case Event::SYNC_EVENT:
+    // Nothing to do
+    break;
   }
 }
 
@@ -180,6 +190,5 @@ void AsyncRequests::SetPassthrough(bool enable)
 
 bool AsyncRequests::IsQueueEmpty()
 {
-  std::unique_lock<std::mutex> lock(m_mutex);
-  return m_queue.empty();
+  return m_empty.IsSet();
 }

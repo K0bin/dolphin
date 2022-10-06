@@ -30,6 +30,7 @@ public:
       FIFO_RESET,
       PERF_QUERY,
       DO_SAVE_STATE,
+      SYNC_EVENT,
     } type;
     u64 time;
 
@@ -70,6 +71,10 @@ public:
       struct
       {
       } perf_query;
+
+      struct
+      {
+      } sync;
 
       struct
       {
