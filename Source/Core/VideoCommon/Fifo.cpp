@@ -126,7 +126,7 @@ void ExitGpuLoop()
 {
   // This should break the wait loop in CPU thread
   CommandProcessor::fifo.bFF_GPReadEnable.store(0, std::memory_order_relaxed);
-  s_gpu_mainloop.Wait();
+  WaitGPUThread();
 
   // Terminate GPU thread loop
   s_emu_running_state.Set();
@@ -205,7 +205,7 @@ void RunGpuLoop()
         g_vertex_manager->Flush();
         g_framebuffer_manager->RefreshPeekCache();
         AsyncRequests::GetInstance()->PullEvents();
-        s_gpu_mainloop.AllowSleep();
+        //s_gpu_mainloop.AllowSleep();
       },
       100);
 
@@ -227,20 +227,13 @@ void RunGpu()
     CoreTiming::ScheduleEvent(GPU_TIME_SLOT_SIZE, s_event_sync_gpu, GPU_TIME_SLOT_SIZE);
 }
 
-void WakeGPUThread()
-{
-  if (!Core::System::GetInstance().IsDualCoreMode())
-    return;
-
-  s_gpu_mainloop.Wakeup();
-}
-
 void FlushGPUThread()
 {
   if (!Core::System::GetInstance().IsDualCoreMode())
     return;
 
   g_fifo_thread.Flush();
+  s_gpu_mainloop.Wakeup();
 }
 
 void WaitGPUThread()
@@ -378,8 +371,6 @@ void FifoThreadContext::Flush()
 
   std::lock_guard submit_lock(m_submit_mutex_b);
   m_submit_queue_b.push(std::move(submit_chunk));
-
-  WakeGPUThread();
 }
 
 bool FifoThreadContext::FlushIfNecessary()

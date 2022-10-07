@@ -95,9 +95,11 @@ void VideoBackendBase::Video_OutputXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride
     AsyncRequests::Event e;
     e.time = 0;
     e.type = AsyncRequests::Event::SYNC_EVENT;
-    AsyncRequests::GetInstance()->PushEvent(e, true);
+    //AsyncRequests::GetInstance()->PushEvent(e, true);
+    // TODO: Not syncing here causes android to deadlock in vkQueuePresent (wtf)
 
     e.type = AsyncRequests::Event::SWAP_EVENT;
+    e.time = ticks;
     e.swap_event.xfbAddr = xfb_addr;
     e.swap_event.fbWidth = fb_width;
     e.swap_event.fbStride = fb_stride;

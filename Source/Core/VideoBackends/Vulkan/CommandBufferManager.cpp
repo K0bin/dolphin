@@ -433,6 +433,7 @@ void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
   // Do we have a swap chain to present?
   if (present_swap_chain != VK_NULL_HANDLE)
   {
+    WARN_LOG_FMT(VIDEO, "submit thread e");
     // Should have a signal semaphore.
     VkPresentInfoKHR present_info = {VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
                                      nullptr,
@@ -444,6 +445,7 @@ void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
                                      nullptr};
 
     m_last_present_result = vkQueuePresentKHR(g_vulkan_context->GetPresentQueue(), &present_info);
+    WARN_LOG_FMT(VIDEO, "submit thread f");
     if (m_last_present_result != VK_SUCCESS)
     {
       // VK_ERROR_OUT_OF_DATE_KHR is not fatal, just means we need to recreate our swap chain.

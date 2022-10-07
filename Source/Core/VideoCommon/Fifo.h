@@ -42,7 +42,6 @@ enum class SyncGPUReason
 // In dual core mode, this synchronizes with the GPU thread.
 void SyncGPUForRegisterAccess();
 
-void WakeGPUThread();
 void RunGpu();
 void RunGpuLoop();
 void ExitGpuLoop();
@@ -214,12 +213,11 @@ public:
 
     bool ShouldFlush() const
     {
-      return true;
-      //return fifo_entries.size() >= 128 || aux_data_length >= 512 || has_sync;
+      return fifo_entries.size() >= GPFifo::GATHER_PIPE_SIZE * 4 || aux_data_length >= 1024 || has_sync;
     }
 
 private:
-    u8* data  = nullptr;
+    u8* data = nullptr;
     u32 data_capacity = 0;
     u8* aux_data = nullptr;
     u32 aux_data_capacity = 0;

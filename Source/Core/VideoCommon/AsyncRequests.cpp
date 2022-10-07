@@ -88,18 +88,15 @@ void AsyncRequests::PushEvent(const AsyncRequests::Event& event, bool blocking)
     if (!m_enable)
       return;
 
-    if (blocking)
-      Fifo::FlushGPUThread();
+    Fifo::FlushGPUThread();
 
     m_queue.push(event);
-
-    Fifo::WakeGPUThread();
 
     if (blocking) {
       m_cond.wait(lock, [this] { return m_queue.empty(); });
     }
   }
-  if (blocking)
+  if (blocking && event.type == Event::SYNC_EVENT)
     Fifo::WaitGPUThread();
 }
 
