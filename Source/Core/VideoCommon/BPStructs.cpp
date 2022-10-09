@@ -21,6 +21,7 @@
 #include "Core/FifoPlayer/FifoRecorder.h"
 #include "Core/HW/Memmap.h"
 #include "Core/HW/VideoInterface.h"
+#include "Core/System.h"
 
 #include "VideoCommon/BPFunctions.h"
 #include "VideoCommon/BPMemory.h"
@@ -183,6 +184,8 @@ static void BPWritten(const BPCmd& bp, int cycles_into_future)
       g_texture_cache->FlushEFBCopies();
       g_framebuffer_manager->InvalidatePeekCache(false);
       g_framebuffer_manager->RefreshPeekCache();
+      if (!Core::System::GetInstance().IsDualCoreMode())
+        PixelEngine::SetFinish(cycles_into_future);  // may generate interrupt
       DEBUG_LOG_FMT(VIDEO, "GXSetDrawDone SetPEFinish (value: {:#04X})", bp.newvalue & 0xFFFF);
       return;
 
@@ -195,7 +198,9 @@ static void BPWritten(const BPCmd& bp, int cycles_into_future)
     INCSTAT(g_stats.this_frame.num_token);
     g_texture_cache->FlushEFBCopies();
     g_framebuffer_manager->InvalidatePeekCache(false);
-      g_framebuffer_manager->RefreshPeekCache();
+    g_framebuffer_manager->RefreshPeekCache();
+    if (!Core::System::GetInstance().IsDualCoreMode())
+      PixelEngine::SetToken(static_cast<u16>(bp.newvalue & 0xFFFF), false, cycles_into_future);
     DEBUG_LOG_FMT(VIDEO, "SetPEToken {:#06X}", bp.newvalue & 0xFFFF);
     return;
   case BPMEM_PE_TOKEN_INT_ID:  // Pixel Engine Interrupt Token ID
@@ -203,6 +208,8 @@ static void BPWritten(const BPCmd& bp, int cycles_into_future)
     g_texture_cache->FlushEFBCopies();
     g_framebuffer_manager->InvalidatePeekCache(false);
     g_framebuffer_manager->RefreshPeekCache();
+    if (!Core::System::GetInstance().IsDualCoreMode())
+      PixelEngine::SetToken(static_cast<u16>(bp.newvalue & 0xFFFF), true, cycles_into_future);
     DEBUG_LOG_FMT(VIDEO, "SetPEToken + INT {:#06X}", bp.newvalue & 0xFFFF);
     return;
 
