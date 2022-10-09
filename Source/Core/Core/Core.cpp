@@ -278,8 +278,6 @@ void Stop()  // - Hammertime!
   // Dump left over jobs
   HostDispatchJobs();
 
-  GPUThread::SetEmulatorState(false);
-
   INFO_LOG_FMT(CONSOLE, "Stop [Main Thread]\t\t---- Shutting down ----");
 
   // Stop the CPU
@@ -764,10 +762,6 @@ static bool PauseAndLock(bool do_lock, bool unpause_on_unlock)
 
   // audio has to come after CPU, because CPU thread can wait for audio thread (m_throttle).
   DSP::GetDSPEmulator()->PauseAndLock(do_lock, false);
-
-  // video has to come after CPU, because CPU thread can wait for video thread
-  // (s_efbAccessRequested).
-  PauseAndLock(do_lock, false);
 
   ResetRumble();
 

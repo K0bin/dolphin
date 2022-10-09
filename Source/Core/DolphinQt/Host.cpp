@@ -98,25 +98,13 @@ static void RunWithGPUThreadInactive(std::function<void()> f)
   // TODO: What about the unlikely case where the GPU thread calls the panic alert handler
   // while the panic alert handler is processing a panic alert from the CPU thread?
 
-  if (Core::IsGPUThread())
+  if (Core::IsGPUThread() || Core::IsCPUThread())
   {
     // If we are the GPU thread, we can't call Core::PauseAndLock without getting a deadlock,
     // since it would try to pause the GPU thread while that thread is waiting for us.
     // However, since we know that the GPU thread is inactive, we can just run f directly.
 
     f();
-  }
-  else if (Core::IsCPUThread())
-  {
-    // If we are the CPU thread in dual core mode, we can't call Core::PauseAndLock, for the
-    // same reason as above. Instead, we use PauseAndLock to pause the GPU thread only.
-    // (Note that this case cannot be reached in single core mode, because in single core mode,
-    // the CPU and GPU threads are the same thread, and we already checked for the GPU thread.)
-
-    const bool was_running = Core::GetState() == Core::State::Running;
-    GPUThread::PauseAndLock(true, was_running);
-    f();
-    GPUThread::PauseAndLock(false, was_running);
   }
   else
   {

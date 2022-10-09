@@ -21,13 +21,7 @@ namespace GPUThread {
 
     void Run();
 
-    void WaitYieldToUI();
-
     void Exit();
-
-    void SetEmulatorState(bool running);
-
-    void PauseAndLock(bool doLock, bool unpauseOnUnlock);
 
     bool IsActive();
 

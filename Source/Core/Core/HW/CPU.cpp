@@ -191,7 +191,6 @@ void Run()
 static void RunAdjacentSystems(bool running)
 {
   // NOTE: We're assuming these will not try to call Break or EnableStepping.
-  GPUThread::SetEmulatorState(running);
   // Core is responsible for shutting down the sound stream.
   if (s_state != State::PowerDown)
     AudioCommon::SetSoundStreamRunning(running);

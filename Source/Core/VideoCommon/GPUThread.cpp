@@ -13,8 +13,6 @@
 namespace GPUThread {
 
     static Common::BlockingLoop s_gpu_mainloop;
-
-    static Common::Flag s_emu_running_state;
     
     static FifoThreadContext s_fifo_context;
 
@@ -22,34 +20,9 @@ namespace GPUThread {
       s_gpu_mainloop.Prepare();
     }
 
-    void WaitYieldToUI() {
-      s_gpu_mainloop.WaitYield(std::chrono::milliseconds(100), Host_YieldToUI);
-    }
-
     void Exit() {
       // Terminate GPU thread loop
-      s_emu_running_state.Set();
       s_gpu_mainloop.Stop(s_gpu_mainloop.kNonBlock);
-    }
-
-    void SetEmulatorState(bool running) {
-      s_emu_running_state.Set(running);
-      if (running)
-        s_gpu_mainloop.Wakeup();
-      else
-        s_gpu_mainloop.AllowSleep();
-    }
-
-    void PauseAndLock(bool doLock, bool unpauseOnUnlock) {
-      if (doLock) {
-        SetEmulatorState(false);
-
-        if (Core::System::GetInstance().IsDualCoreMode())
-          WaitYieldToUI();
-      } else {
-        if (unpauseOnUnlock)
-          SetEmulatorState(true);
-      }
     }
 
     bool IsActive() {
@@ -108,10 +81,6 @@ namespace GPUThread {
 
       s_gpu_mainloop.Run(
               [] {
-                  // Do nothing while paused
-                  if (!s_emu_running_state.IsSet())
-                    return;
-
                   while (!AsyncRequests::GetInstance()->IsQueueEmpty()) {
                     // Run events from the CPU thread.
                     AsyncRequests::GetInstance()->PullEvents();
