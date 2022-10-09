@@ -19,6 +19,7 @@
 #include "VideoCommon/VertexShaderManager.h"
 #include "VideoCommon/XFMemory.h"
 #include "Core/System.h"
+#include "GPUThread.h"
 
 static void XFMemWritten(u32 transferSize, u32 baseAddress)
 {
@@ -259,7 +260,7 @@ void LoadIndexedXF(CPArray array, u32 index, u16 address, u8 size)
   if (!Core::System::GetInstance().IsDualCoreMode())
     newData = (u32*)Memory::GetPointer(guest_address);
   else
-    newData = (u32*)Fifo::g_fifo_thread.ReadChunk().AuxData(guest_address);
+    newData = (u32*)GPUThread::FifoReadChunk().AuxData(guest_address);
 
 
   bool changed = false;
@@ -286,7 +287,7 @@ void PreprocessIndexedXF(CPArray array, u32 index, u16 address, u8 size)
   const u8* new_data = Memory::GetPointer(guest_address);
 
   const size_t buf_size = size * sizeof(u32);
-  Fifo::g_fifo_thread.WriteChunk().CopyAuxData(guest_address, new_data, buf_size);
+  GPUThread::FifoWriteChunk().CopyAuxData(guest_address, new_data, buf_size);
 }
 
 std::pair<std::string, std::string> GetXFRegInfo(u32 address, u32 value)

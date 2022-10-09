@@ -88,6 +88,7 @@
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/RenderBase.h"
 #include "VideoCommon/VideoBackendBase.h"
+#include "VideoCommon/GPUThread.h"
 
 #ifdef ANDROID
 #include "jni/AndroidCommon/IDCache.h"
@@ -277,7 +278,7 @@ void Stop()  // - Hammertime!
   // Dump left over jobs
   HostDispatchJobs();
 
-  Fifo::EmulatorState(false);
+  GPUThread::SetEmulatorState(false);
 
   INFO_LOG_FMT(CONSOLE, "Stop [Main Thread]\t\t---- Shutting down ----");
 
@@ -622,7 +623,7 @@ static void EmuThread(std::unique_ptr<BootParameters> boot, WindowSystemInfo wsi
     s_cpu_thread = std::thread(cpuThreadFunc, savestate_path, delete_savestate);
 
     // become the GPU thread
-    Fifo::RunGpuLoop();
+    GPUThread::Run();
 
     // We have now exited the Video Loop
     INFO_LOG_FMT(CONSOLE, "{}", StopMessage(false, "Video Loop Ended"));
@@ -766,7 +767,7 @@ static bool PauseAndLock(bool do_lock, bool unpause_on_unlock)
 
   // video has to come after CPU, because CPU thread can wait for video thread
   // (s_efbAccessRequested).
-  Fifo::PauseAndLock(do_lock, false);
+  PauseAndLock(do_lock, false);
 
   ResetRumble();
 

@@ -31,15 +31,12 @@
 #include "VideoCommon/VertexLoaderManager.h"
 #include "VideoCommon/VertexManagerBase.h"
 #include "VideoCommon/VideoBackendBase.h"
+#include "VideoCommon/GPUThread.h"
 
 namespace Fifo
 {
 static constexpr u32 FIFO_SIZE = 2 * 1024 * 1024;
 static constexpr int GPU_TIME_SLOT_SIZE = 1000;
-
-static Common::BlockingLoop s_gpu_mainloop;
-
-static Common::Flag s_emu_running_state;
 
 static CoreTiming::EventType* s_event_sync_gpu;
 
@@ -71,24 +68,6 @@ void DoState(PointerWrap& p)
   p.Do(s_syncing_suspended);
 }
 
-void PauseAndLock(bool doLock, bool unpauseOnUnlock)
-{
-  if (doLock)
-  {
-    EmulatorState(false);
-
-    if (!Core::System::GetInstance().IsDualCoreMode())
-      return;
-
-    s_gpu_mainloop.WaitYield(std::chrono::milliseconds(100), Host_YieldToUI);
-  }
-  else
-  {
-    if (unpauseOnUnlock)
-      EmulatorState(true);
-  }
-}
-
 void Init()
 {
   if (!s_config_callback_id)
@@ -99,13 +78,13 @@ void Init()
   s_video_buffer = static_cast<u8*>(Common::AllocateMemoryPages(FIFO_SIZE + 4));
   ResetVideoBuffer();
   if (Core::System::GetInstance().IsDualCoreMode())
-    s_gpu_mainloop.Prepare();
+    GPUThread::Init();
   s_sync_ticks.store(0);
 }
 
 void Shutdown()
 {
-  if (s_gpu_mainloop.IsRunning())
+  if (GPUThread::IsActive())
     PanicAlertFmt("FIFO shutting down while active");
 
   Common::FreeMemoryPages(s_video_buffer, FIFO_SIZE + 4);
@@ -118,28 +97,6 @@ void Shutdown()
     Config::RemoveConfigChangedCallback(*s_config_callback_id);
     s_config_callback_id = std::nullopt;
   }
-}
-
-// May be executed from any thread, even the graphics thread.
-// Created to allow for self shutdown.
-void ExitGpuLoop()
-{
-  // This should break the wait loop in CPU thread
-  CommandProcessor::fifo.bFF_GPReadEnable.store(0, std::memory_order_relaxed);
-  WaitGPUThread();
-
-  // Terminate GPU thread loop
-  s_emu_running_state.Set();
-  s_gpu_mainloop.Stop(s_gpu_mainloop.kNonBlock);
-}
-
-void EmulatorState(bool running)
-{
-  s_emu_running_state.Set(running);
-  if (running)
-    s_gpu_mainloop.Wakeup();
-  else
-    s_gpu_mainloop.AllowSleep();
 }
 
 // Description: RunGpuLoop() sends data through this function.
@@ -170,49 +127,6 @@ void ResetVideoBuffer()
   s_video_buffer_write_ptr = s_video_buffer;
 }
 
-// Description: Main FIFO update loop
-// Purpose: Keep the Core HW updated about the CPU-GPU distance
-void RunGpuLoop()
-{
-  AsyncRequests::GetInstance()->SetEnable(true);
-  AsyncRequests::GetInstance()->SetPassthrough(false);
-
-  s_gpu_mainloop.Run(
-      [] {
-        // Do nothing while paused
-        if (!s_emu_running_state.IsSet())
-          return;
-
-        while (g_fifo_thread.PopReadChunk())
-        {
-          if (g_fifo_thread.ReadChunk().PullAsyncRequestsBefore())
-          {
-            // Run events from the CPU thread.
-            AsyncRequests::GetInstance()->PullEvents();
-          }
-
-          u32 cycles = 0;
-          DataReader reader;
-          do {
-            reader = g_fifo_thread.ReadChunk().NextFifoReader();
-            OpcodeDecoder::RunFifo<false>(
-                    reader, &cycles);
-          } while (reader.size() != 0);
-        }
-
-        // The fifo is empty, and it's unlikely we will get any more work in the near future.
-        // Make sure VertexManager finishes drawing any primitives it has stored in its buffer.
-        g_vertex_manager->Flush();
-        g_framebuffer_manager->RefreshPeekCache();
-        AsyncRequests::GetInstance()->PullEvents();
-        //s_gpu_mainloop.AllowSleep();
-      },
-      100);
-
-  AsyncRequests::GetInstance()->SetEnable(false);
-  AsyncRequests::GetInstance()->SetPassthrough(true);
-}
-
 bool AtBreakpoint()
 {
   CommandProcessor::SCPFifoStruct& fifo = CommandProcessor::fifo;
@@ -223,31 +137,12 @@ bool AtBreakpoint()
 
 void RunGpu()
 {
-    s_syncing_suspended = false;
-    CoreTiming::ScheduleEvent(GPU_TIME_SLOT_SIZE, s_event_sync_gpu, GPU_TIME_SLOT_SIZE);
-}
-
-void FlushGPUThread()
-{
-  if (!Core::System::GetInstance().IsDualCoreMode())
-    return;
-
-  g_fifo_thread.Flush();
-  s_gpu_mainloop.Wakeup();
-}
-
-void WaitGPUThread()
-{
-  if (!Core::System::GetInstance().IsDualCoreMode())
-    return;
-
-  FlushGPUThread();
-  s_gpu_mainloop.Wait();
+  s_syncing_suspended = false;
+  CoreTiming::ScheduleEvent(GPU_TIME_SLOT_SIZE, s_event_sync_gpu, GPU_TIME_SLOT_SIZE);
 }
 
 static int RunGpuOnCpu(int ticks)
 {
-  bool has_remaining_async_events = AsyncRequests::GetInstance()->IsQueueEmpty();
   CommandProcessor::SCPFifoStruct& fifo = CommandProcessor::fifo;
   bool reset_simd_state = false;
   int available_ticks = int(ticks * s_config_sync_gpu_overclock) + s_sync_ticks.load();
@@ -269,7 +164,7 @@ static int RunGpuOnCpu(int ticks)
       u8* start_ptr = s_video_buffer_read_ptr;
       s_video_buffer_read_ptr = OpcodeDecoder::RunFifo<true>(
               DataReader(s_video_buffer_read_ptr, s_video_buffer_write_ptr), &cycles);
-      g_fifo_thread.WriteChunk().PushFifoData(start_ptr, s_video_buffer_write_ptr - start_ptr);
+      GPUThread::FifoWriteChunk().PushFifoData(start_ptr, s_video_buffer_write_ptr - start_ptr);
     }
     else
     {
@@ -301,10 +196,7 @@ static int RunGpuOnCpu(int ticks)
 
   if (Core::System::GetInstance().IsDualCoreMode())
   {
-    if (has_remaining_async_events)
-      g_fifo_thread.WriteChunk().MarkNeedsAsyncRequestsPull();
-
-    g_fifo_thread.FlushIfNecessary();
+    GPUThread::FlushFifoChunkIfNecessary();
   }
 
   // Discard all available ticks as there is nothing to do any more.
@@ -339,50 +231,5 @@ void Prepare()
   s_event_sync_gpu = CoreTiming::RegisterEvent("SyncGPUCallback", SyncGPUCallback);
   s_syncing_suspended = true;
 }
-
-void FifoThreadContext::Flush()
-{
-  if (m_write_chunk.IsEmpty())
-    return;
-
-  FifoChunk new_chunk;
-  {
-    std::lock_guard free_list_lock(m_free_list_mutex);
-
-    if (m_free_list.empty()) [[unlikely]]
-    {
-      std::lock_guard free_list_b_lock(m_free_list_mutex_b);
-      std::swap(m_free_list, m_free_list_b);
-    }
-
-    if (!m_free_list.empty()) [[likely]]
-    {
-      new_chunk = std::move(m_free_list.back());
-      m_free_list.pop_back();
-    }
-    else
-    {
-      INCSTAT(g_stats.num_fifo_chunks);
-    }
-  }
-
-  new_chunk.Reset();
-  FifoChunk submit_chunk = std::exchange(m_write_chunk, std::move(new_chunk));
-
-  std::lock_guard submit_lock(m_submit_mutex_b);
-  m_submit_queue_b.push(std::move(submit_chunk));
-}
-
-bool FifoThreadContext::FlushIfNecessary()
-{
-  if (m_write_chunk.ShouldFlush())
-  {
-    Flush();
-    return true;
-  }
-  return false;
-}
-
-FifoThreadContext g_fifo_thread;
 
 }  // namespace Fifo

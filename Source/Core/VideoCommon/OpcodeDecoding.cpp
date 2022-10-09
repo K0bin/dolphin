@@ -31,6 +31,7 @@
 #include "VideoCommon/Fifo.h"
 #include "VideoCommon/XFStructs.h"
 #include "Core/System.h"
+#include "GPUThread.h"
 
 namespace OpcodeDecoder
 {
@@ -150,7 +151,7 @@ public:
       {
         const u8* const start_address = Memory::GetPointer(address);
 
-        Fifo::g_fifo_thread.WriteChunk().CopyAuxData(address, start_address, size);
+        GPUThread::FifoWriteChunk().CopyAuxData(address, start_address, size);
 
         if (start_address != nullptr)
         {
@@ -164,7 +165,7 @@ public:
         if (!Core::System::GetInstance().IsDualCoreMode())
           start_address = Memory::GetPointer(address);
         else
-          start_address = Fifo::g_fifo_thread.ReadChunk().AuxData(address);
+          start_address = GPUThread::FifoReadChunk().AuxData(address);
 
         // Avoid the crash if Memory::GetPointer failed ..
         if (start_address != nullptr)

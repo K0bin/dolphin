@@ -157,6 +157,8 @@ add_library(videocommon
   XFMemory.h
   XFStructs.cpp
   XFStructs.h
+  GPUThread.cpp
+  GPUThread.h
 )
 
 target_link_libraries(videocommon

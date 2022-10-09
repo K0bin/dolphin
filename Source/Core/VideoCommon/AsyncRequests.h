@@ -31,6 +31,7 @@ public:
       PERF_QUERY,
       DO_SAVE_STATE,
       SYNC_EVENT,
+      PROCESS_CHUNK,
     } type;
     u64 time;
 
@@ -75,6 +76,10 @@ public:
       struct
       {
       } sync;
+
+      struct
+      {
+      } process_chunk;
 
       struct
       {

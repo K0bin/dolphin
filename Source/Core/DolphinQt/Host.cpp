@@ -109,14 +109,14 @@ static void RunWithGPUThreadInactive(std::function<void()> f)
   else if (Core::IsCPUThread())
   {
     // If we are the CPU thread in dual core mode, we can't call Core::PauseAndLock, for the
-    // same reason as above. Instead, we use Fifo::PauseAndLock to pause the GPU thread only.
+    // same reason as above. Instead, we use PauseAndLock to pause the GPU thread only.
     // (Note that this case cannot be reached in single core mode, because in single core mode,
     // the CPU and GPU threads are the same thread, and we already checked for the GPU thread.)
 
     const bool was_running = Core::GetState() == Core::State::Running;
-    Fifo::PauseAndLock(true, was_running);
+    GPUThread::PauseAndLock(true, was_running);
     f();
-    Fifo::PauseAndLock(false, was_running);
+    GPUThread::PauseAndLock(false, was_running);
   }
   else
   {

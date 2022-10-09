@@ -12,6 +12,7 @@
 #include "VideoCommon/VideoBackendBase.h"
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoState.h"
+#include "GPUThread.h"
 
 AsyncRequests AsyncRequests::s_singleton;
 
@@ -19,16 +20,21 @@ AsyncRequests::AsyncRequests() = default;
 
 void AsyncRequests::PullEventsInternal()
 {
-  // This is only called if the queue isn't empty.
-  // So just flush the pipeline to get accurate results.
-  g_vertex_manager->Flush();
-
   std::unique_lock<std::mutex> lock(m_mutex);
   m_empty.Set();
 
   while (!m_queue.empty())
   {
     Event e = m_queue.front();
+
+    if (e.type != Event::PROCESS_CHUNK)
+    {
+      // This is only called if the queue isn't empty.
+      // So just flush the pipeline to get accurate results.
+      lock.unlock();
+      g_vertex_manager->Flush();
+      lock.lock();
+    }
 
     // try to merge as many efb pokes as possible
     // it's a bit hacky, but some games render a complete frame in this way
@@ -74,6 +80,7 @@ void AsyncRequests::PullEventsInternal()
 
 void AsyncRequests::PushEvent(const AsyncRequests::Event& event, bool blocking)
 {
+  GPUThread::FlushFifoChunk();
   {
     std::unique_lock<std::mutex> lock(m_mutex);
 
@@ -88,16 +95,14 @@ void AsyncRequests::PushEvent(const AsyncRequests::Event& event, bool blocking)
     if (!m_enable)
       return;
 
-    Fifo::FlushGPUThread();
-
     m_queue.push(event);
+
+    GPUThread::Wake();
 
     if (blocking) {
       m_cond.wait(lock, [this] { return m_queue.empty(); });
     }
   }
-  if (blocking && event.type == Event::SYNC_EVENT)
-    Fifo::WaitGPUThread();
 }
 
 void AsyncRequests::WaitForEmptyQueue()
@@ -175,6 +180,10 @@ void AsyncRequests::HandleEvent(const AsyncRequests::Event& e)
 
   case Event::SYNC_EVENT:
     // Nothing to do
+    break;
+
+  case Event::PROCESS_CHUNK:
+    GPUThread::ProcessGPUChunk();
     break;
   }
 }

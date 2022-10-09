@@ -45,6 +45,7 @@
 #include "VideoCommon/CommandProcessor.h"
 #include "VideoCommon/Fifo.h"
 #include "VideoCommon/GeometryShaderManager.h"
+#include "VideoCommon/GPUThread.h"
 #include "VideoCommon/IndexGenerator.h"
 #include "VideoCommon/OpcodeDecoding.h"
 #include "VideoCommon/PixelEngine.h"
@@ -83,7 +84,7 @@ std::string VideoBackendBase::BadShaderFilename(const char* shader_stage, int co
 
 void VideoBackendBase::Video_ExitLoop()
 {
-  Fifo::ExitGpuLoop();
+  GPUThread::Exit();
 }
 
 // Run from the CPU thread (from VideoInterface.cpp)
@@ -95,8 +96,7 @@ void VideoBackendBase::Video_OutputXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride
     AsyncRequests::Event e;
     e.time = 0;
     e.type = AsyncRequests::Event::SYNC_EVENT;
-    //AsyncRequests::GetInstance()->PushEvent(e, true);
-    // TODO: Not syncing here causes android to deadlock in vkQueuePresent (wtf)
+    AsyncRequests::GetInstance()->PushEvent(e, true);
 
     e.type = AsyncRequests::Event::SWAP_EVENT;
     e.time = ticks;
