@@ -25,7 +25,7 @@ void AsyncRequests::PullEventsInternal()
 
   while (!m_queue.empty())
   {
-    Event e = m_queue.front();
+    Event&& e = std::move(m_queue.front());
 
     if (e.type != Event::PROCESS_CHUNK)
     {
@@ -41,13 +41,13 @@ void AsyncRequests::PullEventsInternal()
     if ((e.type == Event::EFB_POKE_COLOR || e.type == Event::EFB_POKE_Z))
     {
       m_merged_efb_pokes.clear();
-      Event first_event = m_queue.front();
+      Event& first_event = m_queue.front();
       const auto t = first_event.type == Event::EFB_POKE_COLOR ? EFBAccessType::PokeColor :
                                                                  EFBAccessType::PokeZ;
 
       do
       {
-        e = m_queue.front();
+        e = std::move(m_queue.front());
 
         EfbPokeData d;
         d.data = e.efb_poke.data;
@@ -65,7 +65,7 @@ void AsyncRequests::PullEventsInternal()
     }
 
     lock.unlock();
-    HandleEvent(e);
+    HandleEvent(std::move(e));
     lock.lock();
 
     m_queue.pop();
@@ -78,24 +78,21 @@ void AsyncRequests::PullEventsInternal()
   }
 }
 
-void AsyncRequests::PushEvent(const AsyncRequests::Event& event, bool blocking)
+void AsyncRequests::PushEvent(AsyncRequests::Event&& event, bool blocking)
 {
   GPUThread::FlushFifoChunk();
 
   std::unique_lock<std::mutex> lock(m_mutex);
 
   if (m_passthrough) {
-    HandleEvent(event);
+    HandleEvent(std::move(event));
     return;
   }
 
   m_empty.Clear();
   m_wake_me_up_again |= blocking;
 
-  if (!m_enable)
-    return;
-
-  m_queue.push(event);
+  m_queue.push(std::move(event));
   GPUThread::Wake();
 
   if (blocking) {
@@ -116,22 +113,7 @@ void AsyncRequests::WaitForEmptyQueue()
   m_cond.wait(lock, [this] { return m_queue.empty(); });
 }
 
-void AsyncRequests::SetEnable(bool enable)
-{
-  std::unique_lock<std::mutex> lock(m_mutex);
-  m_enable = enable;
-
-  if (!enable)
-  {
-    // flush the queue on disabling
-    while (!m_queue.empty())
-      m_queue.pop();
-    if (m_wake_me_up_again)
-      m_cond.notify_all();
-  }
-}
-
-void AsyncRequests::HandleEvent(const AsyncRequests::Event& e)
+void AsyncRequests::HandleEvent(AsyncRequests::Event&& e)
 {
   switch (e.type)
   {
@@ -163,6 +145,7 @@ void AsyncRequests::HandleEvent(const AsyncRequests::Event& e)
     break;
 
   case Event::SWAP_EVENT:
+    WARN_LOG_FMT(VIDEO,"FRAMEAAA");
     GPUThread::BumpGPUFrame();
     g_renderer->Swap(e.swap_event.xfbAddr, e.swap_event.fbWidth, e.swap_event.fbStride,
                      e.swap_event.fbHeight, e.time);
@@ -189,7 +172,7 @@ void AsyncRequests::HandleEvent(const AsyncRequests::Event& e)
     break;
 
   case Event::PROCESS_CHUNK:
-    GPUThread::ProcessGPUChunk();
+    GPUThread::ProcessGPUChunk(std::move(e.process_chunk.chunk));
     break;
   }
 }

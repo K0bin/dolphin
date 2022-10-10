@@ -51,6 +51,7 @@ android {
             if (project.hasProperty('keystore')) {
                 signingConfig signingConfigs.release
             }
+            signingConfig signingConfigs.debug
 
             minifyEnabled true
             shrinkResources true

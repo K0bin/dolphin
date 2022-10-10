@@ -30,10 +30,6 @@ namespace GPUThread {
 
     void FlushFifoChunk();
 
-    void FlushFifoChunkIfNecessary();
-
-    void ProcessGPUChunk();
-
     void BumpCPUFrame();
     void BumpGPUFrame();
 
@@ -88,9 +84,9 @@ namespace GPUThread {
 
     class FifoThreadContext {
     public:
-        void Flush();
+        void PopWriteChunk();
 
-        bool PopReadChunk();
+        void PushReadChunk(FifoChunk&& chunk);
 
         FifoChunk &WriteChunk() {
           return m_write_chunk;
@@ -104,13 +100,9 @@ namespace GPUThread {
         FifoChunk m_write_chunk;
         FifoChunk m_read_chunk;
 
-        std::queue<FifoChunk> m_submit_queue;
-        std::queue<FifoChunk> m_submit_queue_b;
         std::vector<FifoChunk> m_free_list;
         std::vector<FifoChunk> m_free_list_b;
 
-        std::mutex m_submit_mutex;
-        std::mutex m_submit_mutex_b;
         std::mutex m_free_list_mutex;
         std::mutex m_free_list_mutex_b;
 
@@ -119,5 +111,7 @@ namespace GPUThread {
     FifoChunk& FifoWriteChunk();
 
     FifoChunk& FifoReadChunk();
+
+    void ProcessGPUChunk(FifoChunk&& chunk);
 }
 

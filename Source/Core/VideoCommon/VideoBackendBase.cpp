@@ -102,7 +102,7 @@ void VideoBackendBase::Video_OutputXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride
     e.swap_event.fbWidth = fb_width;
     e.swap_event.fbStride = fb_stride;
     e.swap_event.fbHeight = fb_height;
-    AsyncRequests::GetInstance()->PushEvent(e, false);
+    AsyncRequests::GetInstance()->PushEvent(std::move(e), false);
   }
 }
 
@@ -122,7 +122,7 @@ u32 VideoBackendBase::Video_AccessEFB(EFBAccessType type, u32 x, u32 y, u32 data
     e.efb_poke.data = data;
     e.efb_poke.x = x;
     e.efb_poke.y = y;
-    AsyncRequests::GetInstance()->PushEvent(e, false);
+    AsyncRequests::GetInstance()->PushEvent(std::move(e), false);
     return 0;
   }
   else
@@ -135,7 +135,7 @@ u32 VideoBackendBase::Video_AccessEFB(EFBAccessType type, u32 x, u32 y, u32 data
     e.efb_peek.x = x;
     e.efb_peek.y = y;
     e.efb_peek.data = &result;
-    AsyncRequests::GetInstance()->PushEvent(e, true);
+    AsyncRequests::GetInstance()->PushEvent(std::move(e), true);
     return result;
   }
 }
@@ -152,7 +152,7 @@ u32 VideoBackendBase::Video_GetQueryResult(PerfQueryType type)
   e.type = AsyncRequests::Event::PERF_QUERY;
 
   if (!g_perf_query->IsFlushed())
-    AsyncRequests::GetInstance()->PushEvent(e, true);
+    AsyncRequests::GetInstance()->PushEvent(std::move(e), true);
 
   return g_perf_query->GetQueryResult(type);
 }
@@ -189,7 +189,7 @@ u16 VideoBackendBase::Video_GetBoundingBox(int index)
   e.type = AsyncRequests::Event::BBOX_READ;
   e.bbox.index = index;
   e.bbox.data = &result;
-  AsyncRequests::GetInstance()->PushEvent(e, true);
+  AsyncRequests::GetInstance()->PushEvent(std::move(e), true);
 
   return result;
 }
@@ -295,7 +295,7 @@ void VideoBackendBase::DoState(PointerWrap& p)
   AsyncRequests::Event ev = {};
   ev.do_save_state.p = &p;
   ev.type = AsyncRequests::Event::DO_SAVE_STATE;
-  AsyncRequests::GetInstance()->PushEvent(ev, true);
+  AsyncRequests::GetInstance()->PushEvent(std::move(ev), true);
 }
 
 void VideoBackendBase::InitializeShared()

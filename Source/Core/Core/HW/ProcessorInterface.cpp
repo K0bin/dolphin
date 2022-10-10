@@ -121,7 +121,7 @@ void RegisterMMIO(MMIO::Mapping* mmio, u32 base)
 
                      AsyncRequests::Event ev = {};
                      ev.type = AsyncRequests::Event::FIFO_RESET;
-                     AsyncRequests::GetInstance()->PushEvent(ev);
+                     AsyncRequests::GetInstance()->PushEvent(std::move(ev));
                    }
                  }));
 

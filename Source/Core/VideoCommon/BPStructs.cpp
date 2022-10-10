@@ -551,11 +551,21 @@ static void BPWritten(const BPCmd& bp, int cycles_into_future)
         if (tmem_addr_even + bytes_read > TMEM_SIZE)
           bytes_read = TMEM_SIZE - tmem_addr_even;
 
-        Memory::CopyFromEmu(texMem + tmem_addr_even, src_addr, bytes_read);
+        u8* src_ptr;
+        if (!Core::System::GetInstance().IsDualCoreMode())
+          Memory::GetPointer(src_addr);
+        else
+          src_ptr = GPUThread::FifoReadChunk().AuxData(src_addr);
+
+        memcpy(texMem + tmem_addr_even, src_ptr, bytes_read);
       }
       else  // RGBA8 tiles (and CI14, but that might just be stupid libogc!)
       {
-        u8* src_ptr = Memory::GetPointer(src_addr);
+        u8* src_ptr;
+        if (!Core::System::GetInstance().IsDualCoreMode())
+          src_ptr = Memory::GetPointer(src_addr);
+        else
+          src_ptr = GPUThread::FifoReadChunk().AuxData(src_addr);
 
         // AR and GB tiles are stored in separate TMEM banks => can't use a single memcpy for
         // everything
@@ -745,6 +755,12 @@ void LoadBPReg(u8 reg, u32 value, int cycles_into_future)
 
 void LoadBPRegPreprocess(u8 reg, u32 value, int cycles_into_future)
 {
+  int oldval = ((u32*)&bpmem)[reg];
+  int newval = (oldval & ~bpmem.bpMask) | (value & bpmem.bpMask);
+  int changes = (oldval ^ newval) & 0xFFFFFF;
+
+  BPCmd bp = {reg, changes, newval};
+
   // masking via BPMEM_BP_MASK could hypothetically be a problem
   u32 newval = value & 0xffffff;
   switch (reg)
@@ -763,6 +779,40 @@ void LoadBPRegPreprocess(u8 reg, u32 value, int cycles_into_future)
   case BPMEM_PE_TOKEN_INT_ID:  // Pixel Engine Interrupt Token ID
     PixelEngine::SetToken(newval & 0xffff, true, cycles_into_future);
     return;
+
+    case BPMEM_PRELOAD_MODE:
+      if (bp.newvalue != 0) {
+        BPS_TmemConfig &tmem_cfg = bpmem.tmem_config;
+        u32 src_addr = tmem_cfg.preload_addr << 5;
+        u32 bytes_read = 0;
+        u32 tmem_addr_even = tmem_cfg.preload_tmem_even * TMEM_LINE_SIZE;
+
+        if (tmem_cfg.preload_tile_info.type != 3) {
+          bytes_read = tmem_cfg.preload_tile_info.count * TMEM_LINE_SIZE;
+          if (tmem_addr_even + bytes_read > TMEM_SIZE)
+            bytes_read = TMEM_SIZE - tmem_addr_even;
+
+          u8* src_ptr = Memory::GetPointer(src_addr);
+          GPUThread::FifoWriteChunk().CopyAuxData(src_addr, src_ptr, bytes_read)
+        }
+        else
+        {
+          u8 *src_ptr = Memory::GetPointer(src_addr);
+          u32 tmem_addr_odd = tmem_cfg.preload_tmem_odd * TMEM_LINE_SIZE;
+          for (u32 i = 0; i < tmem_cfg.preload_tile_info.count; ++i)
+          {
+            if (tmem_addr_even + TMEM_LINE_SIZE > TMEM_SIZE ||
+                tmem_addr_odd + TMEM_LINE_SIZE > TMEM_SIZE)
+              break;
+
+            tmem_addr_even += TMEM_LINE_SIZE;
+            tmem_addr_odd += TMEM_LINE_SIZE;
+            bytes_read += TMEM_LINE_SIZE * 2;
+          }
+          GPUThread::FifoWriteChunk().CopyAuxData(src_addr, src_ptr, bytes_read);
+        }
+      }
+      return;
 
   case BPMEM_TRIGGER_EFB_COPY:  // Copy EFB Region or Render to the XFB or Clear the screen.
   {

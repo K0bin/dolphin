@@ -11,6 +11,8 @@
 #include "Common/CommonTypes.h"
 #include "Common/Flag.h"
 
+#include "VideoCommon/GPUThread.h"
+
 struct EfbPokeData;
 class PointerWrap;
 
@@ -19,6 +21,96 @@ class AsyncRequests
 public:
   struct Event
   {
+    Event() {
+      // anything but PROCESS_CHUNK
+      type = SYNC_EVENT;
+    }
+    ~Event() {
+      if (type == PROCESS_CHUNK)
+        process_chunk.chunk.~FifoChunk();
+    }
+
+    Event(Event&& other) noexcept
+    {
+      time = other.time;
+
+      switch (other.type)
+      {
+        case SYNC_EVENT:
+          break;
+        case PROCESS_CHUNK:
+            new (&process_chunk.chunk) GPUThread::FifoChunk(std::move(other.process_chunk.chunk));
+          break;
+        case EFB_PEEK_COLOR:
+        case EFB_PEEK_Z:
+          efb_peek = other.efb_peek;
+          break;
+        case EFB_POKE_COLOR:
+        case EFB_POKE_Z:
+          efb_poke = other.efb_poke;
+          break;
+        case SWAP_EVENT:
+          swap_event = other.swap_event;
+          break;
+        case BBOX_READ:
+          bbox = other.bbox;
+          break;
+        case FIFO_RESET:
+          fifo_reset = other.fifo_reset;
+          break;
+        case PERF_QUERY:
+          perf_query = other.perf_query;
+          break;
+        case DO_SAVE_STATE:
+          do_save_state = other.do_save_state;
+          break;
+      }
+      type = other.type;
+    }
+
+    Event& operator=(Event &&other) noexcept
+    {
+      time = other.time;
+
+      switch (other.type)
+      {
+        case SYNC_EVENT:
+          break;
+        case PROCESS_CHUNK:
+          if (type == PROCESS_CHUNK)
+            process_chunk.chunk = std::move(other.process_chunk.chunk);
+          else
+            new (&process_chunk.chunk) GPUThread::FifoChunk(std::move(other.process_chunk.chunk));
+          break;
+        case EFB_PEEK_COLOR:
+        case EFB_PEEK_Z:
+          efb_peek = other.efb_peek;
+          break;
+        case EFB_POKE_COLOR:
+        case EFB_POKE_Z:
+          efb_poke = other.efb_poke;
+          break;
+        case SWAP_EVENT:
+          swap_event = other.swap_event;
+          break;
+        case BBOX_READ:
+          bbox = other.bbox;
+          break;
+        case FIFO_RESET:
+          fifo_reset = other.fifo_reset;
+          break;
+        case PERF_QUERY:
+          perf_query = other.perf_query;
+          break;
+        case DO_SAVE_STATE:
+          do_save_state = other.do_save_state;
+          break;
+      }
+      type = other.type;
+
+      return *this;
+    }
+
     enum Type
     {
       EFB_POKE_COLOR,
@@ -79,6 +171,7 @@ public:
 
       struct
       {
+          GPUThread::FifoChunk chunk;
       } process_chunk;
 
       struct
@@ -95,9 +188,8 @@ public:
     if (!m_empty.IsSet())
       PullEventsInternal();
   }
-  void PushEvent(const Event& event, bool blocking = false);
+  void PushEvent(Event&& event, bool blocking = false);
   void WaitForEmptyQueue();
-  void SetEnable(bool enable);
   void SetPassthrough(bool enable);
   bool IsQueueEmpty();
 
@@ -105,7 +197,7 @@ public:
 
 private:
   void PullEventsInternal();
-  void HandleEvent(const Event& e);
+  void HandleEvent(Event&& e);
 
   static AsyncRequests s_singleton;
 

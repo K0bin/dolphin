@@ -46,6 +46,8 @@
             android:name="android.max_aspect"
             android:value="2.1"/>
 
+        <profileable android:shell="true" android:enabled="true" />
+
         <activity
             android:name=".ui.main.MainActivity"
             android:exported="true"

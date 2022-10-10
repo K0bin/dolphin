@@ -9,6 +9,7 @@
 #include "VideoCommon/FramebufferManager.h"
 #include "Core/Host.h"
 #include "GPUThread.h"
+#include "AsyncRequests.h"
 
 namespace GPUThread {
 
@@ -41,16 +42,22 @@ namespace GPUThread {
 
       if (s_cpu_frame_number > s_gpu_frame_number.load() + 1)
       {
-        std::unique_lock lock(s_gpu_frame_mutex);
-        s_gpu_frame_condvar.wait(lock, [&] { return s_cpu_frame_number <= s_gpu_frame_number.load() + 1; });
-      }
+        WARN_LOG_FMT(VIDEO, "Syncing! GPU Frame: {}, CPU frame: {}", s_gpu_frame_number.load(), s_cpu_frame_number);
 
-      s_fifo_context.Flush();
+        // TODO: this dead locks here
+
+        // TODO: memory reads in BPStructs.cpp
+
+        std::unique_lock lock(s_gpu_frame_mutex);
+        s_gpu_frame_condvar.wait(lock, [&] { Wake(); return s_cpu_frame_number <= s_gpu_frame_number.load() + 1; });
+      }
 
       AsyncRequests::Event e;
       e.type = AsyncRequests::Event::PROCESS_CHUNK;
       e.time = 0;
-      AsyncRequests::GetInstance()->PushEvent(e);
+      new (&e.process_chunk.chunk) FifoChunk(std::move(FifoWriteChunk()));
+      AsyncRequests::GetInstance()->PushEvent(std::move(e));
+      s_fifo_context.PopWriteChunk();
     }
 
     void Wake()
@@ -59,6 +66,7 @@ namespace GPUThread {
     }
 
     void BumpGPUFrame() {
+      WARN_LOG_FMT(VIDEO, "GPU Frame: {}", s_gpu_frame_number.load());
       std::lock_guard lock(s_gpu_frame_mutex);
       s_gpu_frame_number++;
       s_gpu_frame_condvar.notify_one();
@@ -66,11 +74,12 @@ namespace GPUThread {
 
     void BumpCPUFrame()
     {
+      WARN_LOG_FMT(VIDEO, "CPU Frame: {}", s_cpu_frame_number);
       s_cpu_frame_number++;
     }
 
-    void ProcessGPUChunk() {
-      ASSERT(s_fifo_context.PopReadChunk());
+    void ProcessGPUChunk(FifoChunk&& chunk) {
+      s_fifo_context.PushReadChunk(std::move(chunk));
       u32 cycles = 0;
       DataReader reader;
       do {
@@ -93,7 +102,6 @@ namespace GPUThread {
     // Description: Main FIFO update loop
     // Purpose: Keep the Core HW updated about the CPU-GPU distance
     void Run() {
-      AsyncRequests::GetInstance()->SetEnable(true);
       AsyncRequests::GetInstance()->SetPassthrough(false);
 
       s_gpu_mainloop.Run(
@@ -111,14 +119,10 @@ namespace GPUThread {
               },
               100);
 
-      AsyncRequests::GetInstance()->SetEnable(false);
       AsyncRequests::GetInstance()->SetPassthrough(true);
     }
 
-    void FifoThreadContext::Flush() {
-      if (m_write_chunk.IsEmpty())
-        return;
-
+    void FifoThreadContext::PopWriteChunk() {
       FifoChunk new_chunk;
       {
         std::lock_guard free_list_lock(m_free_list_mutex);
@@ -137,10 +141,7 @@ namespace GPUThread {
       }
 
       new_chunk.Reset();
-      FifoChunk submit_chunk = std::exchange(m_write_chunk, std::move(new_chunk));
-
-      std::lock_guard submit_lock(m_submit_mutex_b);
-      m_submit_queue_b.push(std::move(submit_chunk));
+      m_write_chunk = std::move(new_chunk);
     }
 
     FifoChunk::~FifoChunk()
@@ -249,26 +250,13 @@ namespace GPUThread {
       return aux_data + iter->second;
     }
 
-    bool FifoThreadContext::PopReadChunk()
+    void FifoThreadContext::PushReadChunk(FifoChunk&& chunk)
     {
       if (!m_read_chunk.IsEmpty()) [[likely]]
       {
         std::lock_guard lock(m_free_list_mutex_b);
         m_free_list_b.push_back(std::move(m_read_chunk));
       }
-
-      std::lock_guard lock(m_submit_mutex);
-      if (m_submit_queue.empty())
-      {
-        std::lock_guard lock_b(m_submit_mutex_b);
-        std::swap(m_submit_queue, m_submit_queue_b);
-      }
-      if (!m_submit_queue.empty())
-      {
-        m_read_chunk = std::move(m_submit_queue.front());
-        m_submit_queue.pop();
-        return true;
-      }
-      return false;
+      m_read_chunk = std::move(chunk);
     }
 }
