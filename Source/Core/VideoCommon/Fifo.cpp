@@ -178,11 +178,6 @@ static int RunGpuOnCpu(int ticks)
     }
 
     fifo.CPReadWriteDistance -= GPFifo::GATHER_PIPE_SIZE;
-
-    if (Core::System::GetInstance().IsDualCoreMode())
-    {
-      GPUThread::FlushFifoChunkIfNecessary();
-    }
   }
 
   CommandProcessor::SetCPStatusFromGPU();
@@ -190,6 +185,11 @@ static int RunGpuOnCpu(int ticks)
   if (reset_simd_state)
   {
     FPURoundMode::LoadSIMDState();
+  }
+
+  if (Core::System::GetInstance().IsDualCoreMode())
+  {
+    GPUThread::FlushFifoChunk();
   }
 
   // If the GPU is idle, drop the handler.

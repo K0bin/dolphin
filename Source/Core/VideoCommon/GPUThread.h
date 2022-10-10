@@ -64,20 +64,12 @@ namespace GPUThread {
           return fifo_entries.empty();
         }
 
-        void MarkHasSync() {
-          has_sync = true;
-        }
-
         DataReader NextFifoReader() {
           if (fifo_index >= fifo_entries.size())
             return DataReader(nullptr, nullptr);
 
           const FifoEntry &entry = fifo_entries[fifo_index++];
           return DataReader(data + entry.start, data + entry.start + entry.length);
-        }
-
-        bool ShouldFlush() const {
-          return fifo_entries.size() >= GPFifo::GATHER_PIPE_SIZE * 4 || aux_data_length >= 1024 || has_sync;
         }
 
     private:
@@ -89,7 +81,6 @@ namespace GPUThread {
         std::unordered_map<u32, u32> memory_offsets;
         std::vector<FifoEntry> fifo_entries;
         u32 fifo_index = 0;
-        bool has_sync = false;
     };
 
     class FifoThreadContext {
@@ -106,14 +97,6 @@ namespace GPUThread {
           return m_read_chunk;
         }
 
-        void NotifyWorkerIdle() {
-          m_busy.Clear();
-        }
-
-        bool WorkerBusy() {
-          return m_busy.IsSet();
-        }
-
     private:
         FifoChunk m_write_chunk;
         FifoChunk m_read_chunk;
@@ -127,8 +110,6 @@ namespace GPUThread {
         std::mutex m_submit_mutex_b;
         std::mutex m_free_list_mutex;
         std::mutex m_free_list_mutex_b;
-
-        Common::Flag m_busy;
 
     };
 

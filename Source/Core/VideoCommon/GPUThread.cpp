@@ -41,12 +41,6 @@ namespace GPUThread {
       AsyncRequests::GetInstance()->PushEvent(e);
     }
 
-    void FlushFifoChunkIfNecessary()
-    {
-      if (!s_fifo_context.WorkerBusy() || s_fifo_context.WriteChunk().ShouldFlush())
-        FlushFifoChunk();
-    }
-
     void Wake()
     {
       s_gpu_mainloop.Wakeup();
@@ -90,7 +84,6 @@ namespace GPUThread {
                   // Make sure VertexManager finishes drawing any primitives it has stored in its buffer.
                   g_vertex_manager->Flush();
                   g_framebuffer_manager->RefreshPeekCache();
-                  s_fifo_context.NotifyWorkerIdle();
                   s_gpu_mainloop.AllowSleep();
               },
               100);
@@ -125,8 +118,6 @@ namespace GPUThread {
 
       std::lock_guard submit_lock(m_submit_mutex_b);
       m_submit_queue_b.push(std::move(submit_chunk));
-
-      m_busy.Set();
     }
 
     FifoChunk::~FifoChunk()
@@ -151,8 +142,6 @@ namespace GPUThread {
       other.fifo_index = 0;
       aux_data_length = other.aux_data_length;
       other.aux_data_length = 0;
-      has_sync = other.has_sync;
-      other.has_sync = false;
     }
 
     FifoChunk& FifoChunk::operator=(FifoChunk &&other) noexcept
@@ -171,8 +160,6 @@ namespace GPUThread {
       other.fifo_index = 0;
       aux_data_length = other.aux_data_length;
       other.aux_data_length = 0;
-      has_sync = other.has_sync;
-      other.has_sync = false;
       return *this;
     }
 
@@ -182,7 +169,6 @@ namespace GPUThread {
       fifo_entries.clear();
       fifo_index = 0;
       aux_data_length = 0;
-      has_sync = false;
     }
 
     void FifoChunk::PushFifoData(const u8 *src, u32 length)
