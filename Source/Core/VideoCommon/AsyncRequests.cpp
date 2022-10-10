@@ -81,33 +81,32 @@ void AsyncRequests::PullEventsInternal()
 void AsyncRequests::PushEvent(const AsyncRequests::Event& event, bool blocking)
 {
   GPUThread::FlushFifoChunk();
-  {
-    std::unique_lock<std::mutex> lock(m_mutex);
 
-    if (m_passthrough) {
-      HandleEvent(event);
-      return;
-    }
+  std::unique_lock<std::mutex> lock(m_mutex);
 
-    m_empty.Clear();
-    m_wake_me_up_again |= blocking;
+  if (m_passthrough) {
+    HandleEvent(event);
+    return;
+  }
 
-    if (!m_enable)
-      return;
+  m_empty.Clear();
+  m_wake_me_up_again |= blocking;
 
-    m_queue.push(event);
-    GPUThread::Wake();
+  if (!m_enable)
+    return;
 
-    if (blocking) {
-      m_cond.wait(lock, [this]
-      {
-          bool empty = m_queue.empty();
-          if (!empty)
-            GPUThread::Wake();
+  m_queue.push(event);
+  GPUThread::Wake();
 
-          return empty;
-      });
-    }
+  if (blocking) {
+    m_cond.wait(lock, [this]
+    {
+        bool empty = m_queue.empty();
+        if (!empty)
+          GPUThread::Wake();
+
+        return empty;
+    });
   }
 }
 
