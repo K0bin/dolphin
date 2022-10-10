@@ -34,6 +34,9 @@ namespace GPUThread {
 
     void ProcessGPUChunk();
 
+    void BumpCPUFrame();
+    void BumpGPUFrame();
+
     struct FifoEntry {
         u32 start;
         u32 length;

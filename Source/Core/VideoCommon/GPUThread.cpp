@@ -16,6 +16,12 @@ namespace GPUThread {
     
     static FifoThreadContext s_fifo_context;
 
+    // Sync with the GPU thread
+    static std::mutex s_gpu_frame_mutex;
+    static std::condition_variable s_gpu_frame_condvar;
+    static u64 s_cpu_frame_number = 0;
+    static std::atomic<u64> s_gpu_frame_number = 0;
+
     void Init() {
       s_gpu_mainloop.Prepare();
     }
@@ -33,6 +39,12 @@ namespace GPUThread {
       if (FifoWriteChunk().IsEmpty())
         return;
 
+      if (s_cpu_frame_number > s_gpu_frame_number.load() + 1)
+      {
+        std::unique_lock lock(s_gpu_frame_mutex);
+        s_gpu_frame_condvar.wait(lock, [&] { return s_cpu_frame_number <= s_gpu_frame_number.load() + 1; });
+      }
+
       s_fifo_context.Flush();
 
       AsyncRequests::Event e;
@@ -44,6 +56,17 @@ namespace GPUThread {
     void Wake()
     {
       s_gpu_mainloop.Wakeup();
+    }
+
+    void BumpGPUFrame() {
+      std::lock_guard lock(s_gpu_frame_mutex);
+      s_gpu_frame_number++;
+      s_gpu_frame_condvar.notify_one();
+    }
+
+    void BumpCPUFrame()
+    {
+      s_cpu_frame_number++;
     }
 
     void ProcessGPUChunk() {
