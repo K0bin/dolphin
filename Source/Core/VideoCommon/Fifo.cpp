@@ -185,6 +185,11 @@ static int RunGpuOnCpu(int ticks)
     }
 
     fifo.CPReadWriteDistance.fetch_sub(GPFifo::GATHER_PIPE_SIZE, std::memory_order_relaxed);
+
+    if (Core::System::GetInstance().IsDualCoreMode())
+    {
+      GPUThread::FlushFifoChunkIfNecessary();
+    }
   }
 
   CommandProcessor::SetCPStatusFromGPU();
@@ -192,11 +197,6 @@ static int RunGpuOnCpu(int ticks)
   if (reset_simd_state)
   {
     FPURoundMode::LoadSIMDState();
-  }
-
-  if (Core::System::GetInstance().IsDualCoreMode())
-  {
-    GPUThread::FlushFifoChunkIfNecessary();
   }
 
   // Discard all available ticks as there is nothing to do any more.
