@@ -130,9 +130,7 @@ void ResetVideoBuffer()
 bool AtBreakpoint()
 {
   CommandProcessor::SCPFifoStruct& fifo = CommandProcessor::fifo;
-  return fifo.bFF_BPEnable.load(std::memory_order_relaxed) &&
-         (fifo.CPReadPointer.load(std::memory_order_relaxed) ==
-          fifo.CPBreakpoint.load(std::memory_order_relaxed));
+  return fifo.bFF_BPEnable && (fifo.CPReadPointer == fifo.CPBreakpoint);
 }
 
 void RunGpu()
@@ -146,8 +144,8 @@ static int RunGpuOnCpu(int ticks)
   CommandProcessor::SCPFifoStruct& fifo = CommandProcessor::fifo;
   bool reset_simd_state = false;
   int available_ticks = int(ticks * s_config_sync_gpu_overclock) + s_sync_ticks.load();
-  while (fifo.bFF_GPReadEnable.load(std::memory_order_relaxed) &&
-         fifo.CPReadWriteDistance.load(std::memory_order_relaxed) && !AtBreakpoint() &&
+  while (fifo.bFF_GPReadEnable &&
+         fifo.CPReadWriteDistance && !AtBreakpoint() &&
          available_ticks >= 0)
   {
     if (!reset_simd_state)
@@ -156,7 +154,7 @@ static int RunGpuOnCpu(int ticks)
       FPURoundMode::LoadDefaultSIMDState();
       reset_simd_state = true;
     }
-    ReadDataFromFifo(fifo.CPReadPointer.load(std::memory_order_relaxed));
+    ReadDataFromFifo(fifo.CPReadPointer);
     u32 cycles = 0;
     if (Core::System::GetInstance().IsDualCoreMode())
     {
@@ -173,18 +171,16 @@ static int RunGpuOnCpu(int ticks)
     }
     available_ticks -= cycles;
 
-    if (fifo.CPReadPointer.load(std::memory_order_relaxed) ==
-        fifo.CPEnd.load(std::memory_order_relaxed))
+    if (fifo.CPReadPointer == fifo.CPEnd)
     {
-      fifo.CPReadPointer.store(fifo.CPBase.load(std::memory_order_relaxed),
-                               std::memory_order_relaxed);
+      fifo.CPReadPointer = fifo.CPBase;
     }
     else
     {
-      fifo.CPReadPointer.fetch_add(GPFifo::GATHER_PIPE_SIZE, std::memory_order_relaxed);
+      fifo.CPReadPointer += GPFifo::GATHER_PIPE_SIZE;
     }
 
-    fifo.CPReadWriteDistance.fetch_sub(GPFifo::GATHER_PIPE_SIZE, std::memory_order_relaxed);
+    fifo.CPReadWriteDistance -= GPFifo::GATHER_PIPE_SIZE;
 
     if (Core::System::GetInstance().IsDualCoreMode())
     {

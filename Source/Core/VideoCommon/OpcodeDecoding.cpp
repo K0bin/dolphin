@@ -204,7 +204,9 @@ public:
     }
     else
     {
-      CommandProcessor::HandleUnknownOpcode(opcode, data, is_preprocess);
+      if (is_preprocess || !Core::System::GetInstance().IsDualCoreMode())
+        CommandProcessor::HandleUnknownOpcode(opcode, data, is_preprocess);
+
       m_cycles += 1;
     }
   }

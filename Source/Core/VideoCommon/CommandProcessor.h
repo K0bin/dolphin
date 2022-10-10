@@ -18,27 +18,27 @@ namespace CommandProcessor
 struct SCPFifoStruct
 {
   // fifo registers
-  std::atomic<u32> CPBase;
-  std::atomic<u32> CPEnd;
+  u32 CPBase;
+  u32 CPEnd;
   u32 CPHiWatermark = 0;
   u32 CPLoWatermark = 0;
-  std::atomic<u32> CPReadWriteDistance;
-  std::atomic<u32> CPWritePointer;
-  std::atomic<u32> CPReadPointer;
-  std::atomic<u32> CPBreakpoint;
-  std::atomic<u32> SafeCPReadPointer;
+  u32 CPReadWriteDistance;
+  u32 CPWritePointer;
+  u32 CPReadPointer;
+  u32 CPBreakpoint;
+  u32 SafeCPReadPointer;
 
-  std::atomic<u32> bFF_GPLinkEnable;
-  std::atomic<u32> bFF_GPReadEnable;
-  std::atomic<u32> bFF_BPEnable;
-  std::atomic<u32> bFF_BPInt;
-  std::atomic<u32> bFF_Breakpoint;
+  u32 bFF_GPLinkEnable;
+  u32 bFF_GPReadEnable;
+  u32 bFF_BPEnable;
+  u32 bFF_BPInt;
+  u32 bFF_Breakpoint;
 
-  std::atomic<u32> bFF_LoWatermarkInt;
-  std::atomic<u32> bFF_HiWatermarkInt;
+  u32 bFF_LoWatermarkInt;
+  u32 bFF_HiWatermarkInt;
 
-  std::atomic<u32> bFF_LoWatermark;
-  std::atomic<u32> bFF_HiWatermark;
+  u32 bFF_LoWatermark;
+  u32 bFF_HiWatermark;
 
   void Init();
   void DoState(PointerWrap& p);

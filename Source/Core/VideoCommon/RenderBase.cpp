@@ -986,8 +986,8 @@ void Renderer::CheckFifoRecording()
   }
 
   FifoRecorder::GetInstance().EndFrame(
-      CommandProcessor::fifo.CPBase.load(std::memory_order_relaxed),
-      CommandProcessor::fifo.CPEnd.load(std::memory_order_relaxed));
+      CommandProcessor::fifo.CPBase,
+      CommandProcessor::fifo.CPEnd);
 }
 
 void Renderer::RecordVideoMemory()
