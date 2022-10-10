@@ -43,7 +43,7 @@ namespace GPUThread {
 
     void FlushFifoChunkIfNecessary()
     {
-      if (s_fifo_context.WriteChunk().ShouldFlush())
+      if (!s_fifo_context.WorkerBusy() || s_fifo_context.WriteChunk().ShouldFlush())
         FlushFifoChunk();
     }
 
@@ -90,6 +90,7 @@ namespace GPUThread {
                   // Make sure VertexManager finishes drawing any primitives it has stored in its buffer.
                   g_vertex_manager->Flush();
                   g_framebuffer_manager->RefreshPeekCache();
+                  s_fifo_context.NotifyWorkerIdle();
                   s_gpu_mainloop.AllowSleep();
               },
               100);
@@ -124,6 +125,8 @@ namespace GPUThread {
 
       std::lock_guard submit_lock(m_submit_mutex_b);
       m_submit_queue_b.push(std::move(submit_chunk));
+
+      m_busy.Set();
     }
 
     FifoChunk::~FifoChunk()

@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include "Common/CommonTypes.h"
+#include "Common/Flag.h"
 #include "Common/Align.h"
 #include "Common/Assert.h"
 #include "Core/HW/GPFifo.h"
@@ -95,13 +96,6 @@ namespace GPUThread {
     public:
         void Flush();
 
-        bool FlushIfNecessary();
-
-        bool IsEmpty() {
-          std::lock_guard lock(m_submit_mutex);
-          return m_submit_queue.empty();
-        }
-
         bool PopReadChunk();
 
         FifoChunk &WriteChunk() {
@@ -110,6 +104,14 @@ namespace GPUThread {
 
         FifoChunk &ReadChunk() {
           return m_read_chunk;
+        }
+
+        void NotifyWorkerIdle() {
+          m_busy.Clear();
+        }
+
+        bool WorkerBusy() {
+          return m_busy.IsSet();
         }
 
     private:
@@ -125,6 +127,8 @@ namespace GPUThread {
         std::mutex m_submit_mutex_b;
         std::mutex m_free_list_mutex;
         std::mutex m_free_list_mutex_b;
+
+        Common::Flag m_busy;
 
     };
 
