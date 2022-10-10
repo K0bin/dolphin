@@ -45,7 +45,6 @@ static u8* s_video_buffer;
 static u8* s_video_buffer_read_ptr;
 static std::atomic<u8*> s_video_buffer_write_ptr;
 
-static std::atomic<int> s_sync_ticks;
 static bool s_syncing_suspended;
 
 static std::optional<size_t> s_config_callback_id = std::nullopt;
@@ -64,7 +63,6 @@ void DoState(PointerWrap& p)
   s_video_buffer_write_ptr = write_ptr;
   p.DoPointer(s_video_buffer_read_ptr, s_video_buffer);
 
-  p.Do(s_sync_ticks);
   p.Do(s_syncing_suspended);
 }
 
@@ -79,7 +77,6 @@ void Init()
   ResetVideoBuffer();
   if (Core::System::GetInstance().IsDualCoreMode())
     GPUThread::Init();
-  s_sync_ticks.store(0);
 }
 
 void Shutdown()
@@ -143,7 +140,7 @@ static int RunGpuOnCpu(int ticks)
 {
   CommandProcessor::SCPFifoStruct& fifo = CommandProcessor::fifo;
   bool reset_simd_state = false;
-  int available_ticks = int(ticks * s_config_sync_gpu_overclock) + s_sync_ticks.load();
+  int available_ticks = int(ticks * s_config_sync_gpu_overclock);
   while (fifo.bFF_GPReadEnable &&
          fifo.CPReadWriteDistance && !AtBreakpoint() &&
          available_ticks >= 0)
@@ -194,9 +191,6 @@ static int RunGpuOnCpu(int ticks)
   {
     FPURoundMode::LoadSIMDState();
   }
-
-  // Discard all available ticks as there is nothing to do any more.
-  s_sync_ticks.store(std::min(available_ticks, 0));
 
   // If the GPU is idle, drop the handler.
   if (available_ticks >= 0)
