@@ -93,11 +93,9 @@ void VideoBackendBase::Video_OutputXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride
 {
   if (m_initialized && g_renderer && !g_ActiveConfig.bImmediateXFB)
   {
-    AsyncRequests::Event e;
-    e.time = 0;
-    e.type = AsyncRequests::Event::SYNC_EVENT;
-    AsyncRequests::GetInstance()->PushEvent(e, true);
+    GPUThread::BumpCPUFrame();
 
+    AsyncRequests::Event e;
     e.type = AsyncRequests::Event::SWAP_EVENT;
     e.time = ticks;
     e.swap_event.xfbAddr = xfb_addr;

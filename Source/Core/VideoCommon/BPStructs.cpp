@@ -325,6 +325,8 @@ static void BPWritten(const BPCmd& bp, int cycles_into_future)
 
       if (g_ActiveConfig.bImmediateXFB)
       {
+        GPUThread::BumpGPUFrame();
+
         // below div two to convert from bytes to pixels - it expects width, not stride
         g_renderer->Swap(destAddr, destStride / 2, destStride, height, CoreTiming::GetTicks());
       }
@@ -753,15 +755,47 @@ void LoadBPRegPreprocess(u8 reg, u32 value, int cycles_into_future)
       PixelEngine::SetFinish(cycles_into_future);
       GPUThread::FifoWriteChunk().MarkHasSync();
     }
-    break;
+    return;
+
   case BPMEM_PE_TOKEN_ID:
     PixelEngine::SetToken(newval & 0xffff, false, cycles_into_future);
     GPUThread::FifoWriteChunk().MarkHasSync();
-    break;
+    return;
+
   case BPMEM_PE_TOKEN_INT_ID:  // Pixel Engine Interrupt Token ID
     PixelEngine::SetToken(newval & 0xffff, true, cycles_into_future);
     GPUThread::FifoWriteChunk().MarkHasSync();
-    break;
+    return;
+
+  case BPMEM_TRIGGER_EFB_COPY:  // Copy EFB Region or Render to the XFB or Clear the screen.
+  {
+    if (!g_ActiveConfig.bImmediateXFB)
+      break;
+
+    MathUtil::Rectangle<s32> srcRect;
+    srcRect.left = bpmem.copyTexSrcXY.x;
+    srcRect.top = bpmem.copyTexSrcXY.y;
+    srcRect.right = bpmem.copyTexSrcXY.x + bpmem.copyTexSrcWH.x + 1;
+    srcRect.bottom = bpmem.copyTexSrcXY.y + bpmem.copyTexSrcWH.y + 1;
+    const UPE_Copy PE_copy = bpmem.triggerEFBCopy;
+
+    if (u32(srcRect.right) > EFB_WIDTH || u32(srcRect.bottom) > EFB_HEIGHT)
+    {
+      if (u32(srcRect.left) >= EFB_WIDTH || u32(srcRect.top) >= EFB_HEIGHT)
+      {
+        return;
+      }
+    }
+
+    // Check if we are to copy from the EFB or draw to the XFB
+    if (PE_copy.copy_to_xfb != 0)
+    {
+      // This is where we'd present with ImmediateXFB
+      GPUThread::BumpCPUFrame();
+    }
+
+  break;
+  }
   }
 }
 
