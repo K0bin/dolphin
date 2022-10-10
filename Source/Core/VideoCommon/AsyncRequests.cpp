@@ -163,7 +163,6 @@ void AsyncRequests::HandleEvent(const AsyncRequests::Event& e)
     break;
 
   case Event::SWAP_EVENT:
-    GPUThread::BumpGPUFrame();
     g_renderer->Swap(e.swap_event.xfbAddr, e.swap_event.fbWidth, e.swap_event.fbStride,
                      e.swap_event.fbHeight, e.time);
     break;

@@ -16,9 +16,6 @@ namespace GPUThread {
     
     static FifoThreadContext s_fifo_context;
 
-    static u64 s_cpu_frame_number = 0;
-    static std::atomic<u64> s_gpu_frame_number = 0;
-
     void Init() {
       s_gpu_mainloop.Prepare();
     }
@@ -53,17 +50,6 @@ namespace GPUThread {
     void Wake()
     {
       s_gpu_mainloop.Wakeup();
-    }
-
-    void BumpGPUFrame() {
-      s_gpu_frame_number++;
-    }
-
-    void BumpCPUFrame()
-    {
-      while (s_gpu_frame_number.load() != s_cpu_frame_number)
-      {}
-      s_cpu_frame_number++;
     }
 
     void ProcessGPUChunk() {
