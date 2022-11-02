@@ -85,6 +85,7 @@ public:
   // Was the last present submitted to the queue a failure? If so, we must recreate our swapchain.
   bool CheckLastPresentFail() { return m_last_present_failed.TestAndClear(); }
   VkResult GetLastPresentResult() const { return m_last_present_result; }
+  bool CheckLastPresentDone() { return m_last_present_done.TestAndClear(); }
 
   // Schedule a vulkan resource for destruction later on. This will occur when the command buffer
   // is next re-used, and the GPU has finished working with the specified resource.
@@ -165,6 +166,7 @@ private:
   bool m_submit_worker_idle = true;
   Common::Flag m_last_present_failed;
   VkResult m_last_present_result = VK_SUCCESS;
+  Common::Flag m_last_present_done;
 
   // Fence thread
   std::thread m_fence_thread;
