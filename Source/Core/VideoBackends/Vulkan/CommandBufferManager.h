@@ -143,6 +143,7 @@ private:
   std::array<CmdBufferResources, NUM_COMMAND_BUFFERS> m_command_buffers;
   u32 m_current_frame = 0;
   u32 m_current_cmd_buffer = 0;
+  u32 m_descriptor_set_count = 0;
 
   // Threaded command buffer execution
   std::thread m_submit_thread;
@@ -160,8 +161,6 @@ private:
   bool m_submit_worker_idle = true;
   Common::Flag m_last_present_failed;
   VkResult m_last_present_result = VK_SUCCESS;
-  bool m_use_threaded_submission = false;
-  u32 m_descriptor_set_count = 0;
 };
 
 extern std::unique_ptr<CommandBufferManager> g_command_buffer_mgr;
