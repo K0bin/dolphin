@@ -11,6 +11,7 @@
 #include "Common/Thread.h"
 
 #include "VideoBackends/Vulkan/VulkanContext.h"
+#include "VideoBackends/Vulkan/StateTracker.h"
 
 namespace Vulkan
 {
@@ -22,8 +23,11 @@ CommandBufferManager::~CommandBufferManager()
 {
   // If the worker thread is enabled, stop and block until it exits.
   WaitForWorkerThreadIdle();
+  WaitForFencerWorkerThreadIdle();
   m_submit_loop->Stop();
+  m_fence_loop->Stop();
   m_submit_thread.join();
+  m_fence_thread.join();
 
   DestroyCommandBuffers();
 }
@@ -31,6 +35,9 @@ CommandBufferManager::~CommandBufferManager()
 bool CommandBufferManager::Initialize()
 {
   if (!CreateCommandBuffers())
+    return false;
+
+  if (!CreateFenceThread())
     return false;
 
   if (!CreateSubmitThread())
@@ -211,11 +218,40 @@ VkDescriptorSet CommandBufferManager::AllocateDescriptorSet(VkDescriptorSetLayou
   return descriptor_set;
 }
 
+bool CommandBufferManager::CreateFenceThread()
+{
+  m_fence_loop = std::make_unique<Common::BlockingLoop>();
+  m_fence_thread = std::thread([this]() {
+      Common::SetCurrentThreadName("Vulkan FenceThread");
+      m_fence_loop->Run([this]() {
+          PendingFenceCounter fence;
+          {
+            std::lock_guard<std::mutex> guard(m_pending_fences_lock);
+            if (m_pending_fences.empty())
+            {
+              m_fence_loop->AllowSleep();
+              m_fence_condvar.notify_all();
+              return;
+            }
+
+            fence = m_pending_fences.front();
+            m_pending_fences.pop_front();
+          }
+
+          vkWaitForFences(g_vulkan_context->GetDevice(), 1, &fence.fence, true, ~0ul);
+          m_completed_fence_counter = fence.counter;
+          m_fence_condvar.notify_all();
+      });
+  });
+
+  return true;
+}
+
 bool CommandBufferManager::CreateSubmitThread()
 {
   m_submit_loop = std::make_unique<Common::BlockingLoop>();
   m_submit_thread = std::thread([this]() {
-    Common::SetCurrentThreadName("Vulkan CommandBufferManager SubmitThread");
+    Common::SetCurrentThreadName("Vulkan SubmitThread");
 
     m_submit_loop->Run([this]() {
       PendingCommandBufferSubmit submit;
@@ -224,7 +260,6 @@ bool CommandBufferManager::CreateSubmitThread()
         if (m_pending_submits.empty())
         {
           m_submit_loop->AllowSleep();
-          m_submit_worker_idle = true;
           m_submit_worker_condvar.notify_all();
           return;
         }
@@ -236,16 +271,9 @@ bool CommandBufferManager::CreateSubmitThread()
       SubmitCommandBuffer(submit.command_buffer_index, submit.present_swap_chain,
                           submit.present_image_index);
       CmdBufferResources& resources = m_command_buffers[submit.command_buffer_index];
-      resources.waiting_for_submit.store(false, std::memory_order_release);
+      m_submitted_fence_counter = resources.fence_counter;
 
-      {
-        std::lock_guard<std::mutex> guard(m_pending_submit_lock);
-        if (m_pending_submits.empty())
-        {
-          m_submit_worker_idle = true;
-          m_submit_worker_condvar.notify_all();
-        }
-      }
+      m_submit_worker_condvar.notify_all();
     });
   });
 
@@ -254,8 +282,20 @@ bool CommandBufferManager::CreateSubmitThread()
 
 void CommandBufferManager::WaitForWorkerThreadIdle()
 {
+  if (m_next_fence_counter < 2)
+    return;
+
   std::unique_lock lock{m_pending_submit_lock};
-  m_submit_worker_condvar.wait(lock, [&] { return m_submit_worker_idle; });
+  m_submit_worker_condvar.wait(lock, [&] { return m_submitted_fence_counter.load() >= m_next_fence_counter - 2; });
+}
+
+void CommandBufferManager::WaitForFencerWorkerThreadIdle()
+{
+  if (m_next_fence_counter < 2)
+    return;
+
+  std::unique_lock lock{m_pending_fences_lock};
+  m_fence_condvar.wait(lock, [&] { return m_next_fence_counter - 2; });
 }
 
 void CommandBufferManager::WaitForFenceCounter(u64 fence_counter)
@@ -263,41 +303,21 @@ void CommandBufferManager::WaitForFenceCounter(u64 fence_counter)
   if (m_completed_fence_counter >= fence_counter)
     return;
 
-  // Find the first command buffer which covers this counter value.
-  u32 index = (m_current_cmd_buffer + 1) % NUM_COMMAND_BUFFERS;
-  while (index != m_current_cmd_buffer)
+  if (fence_counter == GetCurrentFenceCounter())
   {
-    if (m_command_buffers[index].fence_counter >= fence_counter)
-      break;
-
-    index = (index + 1) % NUM_COMMAND_BUFFERS;
+    SubmitCommandBuffer(false, true);
+    return;
   }
 
-  ASSERT(index != m_current_cmd_buffer);
-  WaitForCommandBufferCompletion(index);
+  std::unique_lock lock{m_pending_fences_lock};
+  m_fence_condvar.wait(lock, [&] { return m_completed_fence_counter >= fence_counter; });
 }
 
-void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
+void CommandBufferManager::CleanupCompletedCommandBuffers()
 {
-  CmdBufferResources& resources = m_command_buffers[index];
-
-  // Ensure this command buffer has been submitted.
-  if (resources.waiting_for_submit.load(std::memory_order_acquire))
-  {
-    WaitForWorkerThreadIdle();
-    ASSERT_MSG(VIDEO, !resources.waiting_for_submit.load(std::memory_order_relaxed),
-               "Submit thread is idle but command buffer is still waiting for submission!");
-  }
-
-  // Wait for this command buffer to be completed.
-  VkResult res =
-      vkWaitForFences(g_vulkan_context->GetDevice(), 1, &resources.fence, VK_TRUE, UINT64_MAX);
-  if (res != VK_SUCCESS)
-    LOG_VULKAN_ERROR(res, "vkWaitForFences failed: ");
-
   // Clean up any resources for command buffers between the last known completed buffer and this
   // now-completed command buffer. If we use >2 buffers, this may be more than one buffer.
-  const u64 now_completed_counter = resources.fence_counter;
+  const u64 now_completed_counter = m_completed_fence_counter;
   u32 cleanup_index = (m_current_cmd_buffer + 1) % NUM_COMMAND_BUFFERS;
   while (cleanup_index != m_current_cmd_buffer)
   {
@@ -314,8 +334,6 @@ void CommandBufferManager::WaitForCommandBufferCompletion(u32 index)
 
     cleanup_index = (cleanup_index + 1) % NUM_COMMAND_BUFFERS;
   }
-
-  m_completed_fence_counter = now_completed_counter;
 }
 
 void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
@@ -339,11 +357,9 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
   // Submitting off-thread?
   if (submit_on_worker_thread && !wait_for_completion)
   {
-    resources.waiting_for_submit.store(true, std::memory_order_relaxed);
     // Push to the pending submit queue.
     {
       std::lock_guard<std::mutex> guard(m_pending_submit_lock);
-      m_submit_worker_idle = false;
       m_pending_submits.push_back({present_swap_chain, present_image_index, m_current_cmd_buffer});
     }
 
@@ -356,8 +372,12 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
 
     // Pass through to normal submission path.
     SubmitCommandBuffer(m_current_cmd_buffer, present_swap_chain, present_image_index);
+    m_submitted_fence_counter = resources.fence_counter;
     if (wait_for_completion)
-      WaitForCommandBufferCompletion(m_current_cmd_buffer);
+    {
+      std::unique_lock lock{m_pending_fences_lock};
+      m_fence_condvar.wait(lock, [&] { return m_completed_fence_counter >= resources.fence_counter; });
+    }
   }
 
   if (present_swap_chain != VK_NULL_HANDLE)
@@ -369,10 +389,9 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
     while (cmd_buffer_index != m_current_cmd_buffer)
     {
       CmdBufferResources& cmd_buffer = m_command_buffers[cmd_buffer_index];
-      if (cmd_buffer.frame_index == m_current_frame && cmd_buffer.fence_counter != 0 &&
-          cmd_buffer.fence_counter > m_completed_fence_counter)
+      if (cmd_buffer.frame_index == m_current_frame)
       {
-        WaitForCommandBufferCompletion(cmd_buffer_index);
+        WaitForFenceCounter(cmd_buffer.fence_counter);
       }
       cmd_buffer_index = (cmd_buffer_index + 1) % NUM_COMMAND_BUFFERS;
     }
@@ -404,6 +423,7 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
 
   // Switch to next cmdbuffer.
   BeginCommandBuffer();
+  StateTracker::GetInstance()->InvalidateCachedState();
 }
 
 void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
@@ -452,6 +472,12 @@ void CommandBufferManager::SubmitCommandBuffer(u32 command_buffer_index,
                   static_cast<int>(res));
   }
 
+  {
+    std::lock_guard<std::mutex> guard(m_pending_fences_lock);
+    m_pending_fences.push_back({resources.fence, resources.fence_counter});
+    m_fence_loop->Wakeup();
+  }
+
   // Do we have a swap chain to present?
   if (present_swap_chain != VK_NULL_HANDLE)
   {
@@ -495,8 +521,10 @@ void CommandBufferManager::BeginCommandBuffer()
   CmdBufferResources& resources = m_command_buffers[next_buffer_index];
 
   // Wait for the GPU to finish with all resources for this command buffer.
-  if (resources.fence_counter > m_completed_fence_counter)
-    WaitForCommandBufferCompletion(next_buffer_index);
+  if (resources.fence_counter > m_completed_fence_counter && resources.fence_counter != 0)
+    WaitForFenceCounter(resources.fence_counter);
+
+  CleanupCompletedCommandBuffers();
 
   // Reset fence to unsignaled before starting.
   VkResult res = vkResetFences(g_vulkan_context->GetDevice(), 1, &resources.fence);
