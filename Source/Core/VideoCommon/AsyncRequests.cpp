@@ -76,6 +76,23 @@ void AsyncRequests::PushEvent(const AsyncRequests::Event& event, bool blocking)
 {
   std::unique_lock<std::mutex> lock(m_mutex);
 
+  switch (event.type) {
+    case Event::EFB_PEEK_COLOR:
+      INCSTAT(g_stats.this_frame.num_efb_peeks);
+      if (g_renderer->TryAccessEFBOffThread(EFBAccessType::PeekColor, event.efb_peek.x,
+                                            event.efb_peek.y, event.efb_peek.data))
+        return;
+
+      break;
+    case Event::EFB_PEEK_Z:
+      INCSTAT(g_stats.this_frame.num_efb_peeks);
+      if (g_renderer->TryAccessEFBOffThread(EFBAccessType::PeekZ, event.efb_peek.x,
+                                            event.efb_peek.y, event.efb_peek.data))
+        return;
+
+      break;
+  }
+
   if (m_passthrough)
   {
     HandleEvent(event);
@@ -142,11 +159,13 @@ void AsyncRequests::HandleEvent(const AsyncRequests::Event& e)
     INCSTAT(g_stats.this_frame.num_efb_peeks);
     *e.efb_peek.data =
         g_renderer->AccessEFB(EFBAccessType::PeekColor, e.efb_peek.x, e.efb_peek.y, 0);
+      WARN_LOG_FMT(VIDEO, "efb C access on GPU thread");
     break;
 
   case Event::EFB_PEEK_Z:
     INCSTAT(g_stats.this_frame.num_efb_peeks);
     *e.efb_peek.data = g_renderer->AccessEFB(EFBAccessType::PeekZ, e.efb_peek.x, e.efb_peek.y, 0);
+      WARN_LOG_FMT(VIDEO, "efb Z access on GPU thread");
     break;
 
   case Event::SWAP_EVENT:

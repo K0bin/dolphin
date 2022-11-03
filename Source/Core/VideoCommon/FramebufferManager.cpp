@@ -83,6 +83,8 @@ bool FramebufferManager::Initialize()
 
 void FramebufferManager::RecreateEFBFramebuffer()
 {
+  std::scoped_lock lock(m_mutex);
+
   FlushEFBPokes();
   InvalidatePeekCache(true);
 
@@ -409,6 +411,8 @@ MathUtil::Rectangle<int> FramebufferManager::GetEFBCacheTileRect(u32 tile_index)
 
 u32 FramebufferManager::PeekEFBColor(u32 x, u32 y)
 {
+  std::scoped_lock lock(m_mutex);
+
   // The y coordinate here assumes upper-left origin, but the readback texture is lower-left in GL.
   if (g_ActiveConfig.backend_info.bUsesLowerLeftOrigin)
     y = EFB_HEIGHT - 1 - y;
@@ -420,10 +424,9 @@ u32 FramebufferManager::PeekEFBColor(u32 x, u32 y)
   if (IsUsingTiledEFBCache())
     m_efb_color_cache.tiles[tile_index].frame_access_mask |= 1;
 
-  if (m_efb_color_cache.needs_flush)
+  if (m_efb_color_cache.readback_texture->NeedsFlush())
   {
     m_efb_color_cache.readback_texture->Flush();
-    m_efb_color_cache.needs_flush = false;
   }
 
   u32 value;
@@ -433,6 +436,8 @@ u32 FramebufferManager::PeekEFBColor(u32 x, u32 y)
 
 float FramebufferManager::PeekEFBDepth(u32 x, u32 y)
 {
+  std::scoped_lock lock(m_mutex);
+
   // The y coordinate here assumes upper-left origin, but the readback texture is lower-left in GL.
   if (g_ActiveConfig.backend_info.bUsesLowerLeftOrigin)
     y = EFB_HEIGHT - 1 - y;
@@ -444,10 +449,9 @@ float FramebufferManager::PeekEFBDepth(u32 x, u32 y)
   if (IsUsingTiledEFBCache())
     m_efb_depth_cache.tiles[tile_index].frame_access_mask |= 1;
 
-  if (m_efb_depth_cache.needs_flush)
+  if (m_efb_depth_cache.readback_texture->NeedsFlush())
   {
     m_efb_depth_cache.readback_texture->Flush();
-    m_efb_depth_cache.needs_flush = false;
   }
 
   float value;
@@ -455,8 +459,61 @@ float FramebufferManager::PeekEFBDepth(u32 x, u32 y)
   return value;
 }
 
+bool FramebufferManager::TryPeekEFBColorFromCache(u32 x, u32 y, u32* out_color, PixelFormat* out_pixel_format, PixelEngine::AlphaReadMode* out_alpha_read_mode)
+{
+  std::scoped_lock lock(m_mutex);
+
+  // The y coordinate here assumes upper-left origin, but the readback texture is lower-left in GL.
+  if (g_ActiveConfig.backend_info.bUsesLowerLeftOrigin)
+    y = EFB_HEIGHT - 1 - y;
+
+  u32 tile_index;
+  if (!IsEFBCacheTilePresent(false, x, y, &tile_index))
+    return false;
+
+  if (IsUsingTiledEFBCache())
+    m_efb_color_cache.tiles[tile_index].frame_access_mask |= 1;
+
+  if (m_efb_color_cache.readback_texture->NeedsFlush())
+  {
+    return false;
+  }
+
+  *out_pixel_format = m_pixel_format;
+  *out_alpha_read_mode = m_alpha_read_mode;
+  m_efb_color_cache.readback_texture->ReadTexelOffThread(x, y, out_color);
+  return true;
+}
+
+
+bool FramebufferManager::TryPeekEFBDepthFromCache(u32 x, u32 y, float* out_depth, PixelFormat* out_pixel_format, DepthFormat* out_depth_format)
+{
+  std::scoped_lock lock(m_mutex);
+
+  // The y coordinate here assumes upper-left origin, but the readback texture is lower-left in GL.
+  if (g_ActiveConfig.backend_info.bUsesLowerLeftOrigin)
+    y = EFB_HEIGHT - 1 - y;
+
+  u32 tile_index;
+  if (!IsEFBCacheTilePresent(true, x, y, &tile_index))
+    return false;
+
+  if (IsUsingTiledEFBCache())
+    m_efb_depth_cache.tiles[tile_index].frame_access_mask |= 1;
+
+  if (m_efb_depth_cache.readback_texture->NeedsFlush())
+    return false;
+
+  *out_pixel_format = m_pixel_format;
+  *out_depth_format = m_depth_format;
+  m_efb_depth_cache.readback_texture->ReadTexel(x, y, out_depth);
+  return true;
+}
+
 void FramebufferManager::SetEFBCacheTileSize(u32 size)
 {
+  std::scoped_lock lock(m_mutex);
+
   if (m_efb_cache_tile_size == size)
     return;
 
@@ -469,12 +526,19 @@ void FramebufferManager::SetEFBCacheTileSize(u32 size)
 
 void FramebufferManager::RefreshPeekCache()
 {
+  std::scoped_lock lock(m_mutex);
+
+  m_pixel_format = bpmem.zcontrol.pixel_format;
+  m_alpha_read_mode = PixelEngine::GetAlphaReadMode();
+  m_depth_format = bpmem.zcontrol.zformat;
+
   if (m_efb_color_cache.valid && m_efb_depth_cache.valid)
   {
     return;
   }
 
-  bool flush_command_buffer = false;
+  bool flush_color = false;
+  bool flush_depth = false;
 
   if (IsUsingTiledEFBCache())
   {
@@ -484,13 +548,13 @@ void FramebufferManager::RefreshPeekCache()
           (!m_efb_color_cache.valid || !m_efb_color_cache.tiles[i].present))
       {
         PopulateEFBCache(false, i, true);
-        flush_command_buffer = true;
+        flush_color = true;
       }
       if (m_efb_depth_cache.tiles[i].frame_access_mask != 0 &&
           (!m_efb_depth_cache.valid || !m_efb_depth_cache.tiles[i].present))
       {
         PopulateEFBCache(true, i, true);
-        flush_command_buffer = true;
+        flush_depth = true;
       }
     }
   }
@@ -499,23 +563,31 @@ void FramebufferManager::RefreshPeekCache()
     if (!m_efb_color_cache.valid)
     {
       PopulateEFBCache(false, 0, true);
-      flush_command_buffer = true;
+      flush_color = true;
     }
     if (!m_efb_depth_cache.valid)
     {
       PopulateEFBCache(true, 0, true);
-      flush_command_buffer = true;
+      flush_depth = true;
     }
   }
 
-  if (flush_command_buffer)
+  if (flush_color || flush_depth)
   {
+    if (flush_color)
+      m_efb_color_cache.readback_texture->Flush();
+
+    if (flush_depth)
+      m_efb_depth_cache.readback_texture->Flush();
+
     g_renderer->Flush();
   }
 }
 
 void FramebufferManager::InvalidatePeekCache(bool forced)
 {
+  std::scoped_lock lock(m_mutex);
+
   if (forced || m_efb_color_cache.out_of_date)
   {
     if (m_efb_color_cache.valid)
@@ -528,7 +600,6 @@ void FramebufferManager::InvalidatePeekCache(bool forced)
 
     m_efb_color_cache.valid = false;
     m_efb_color_cache.out_of_date = false;
-    m_efb_color_cache.needs_flush = true;
   }
   if (forced || m_efb_depth_cache.out_of_date)
   {
@@ -542,12 +613,13 @@ void FramebufferManager::InvalidatePeekCache(bool forced)
 
     m_efb_depth_cache.valid = false;
     m_efb_depth_cache.out_of_date = false;
-    m_efb_depth_cache.needs_flush = true;
   }
 }
 
 void FramebufferManager::FlagPeekCacheAsOutOfDate()
 {
+  std::scoped_lock lock(m_mutex);
+
   if (m_efb_color_cache.valid)
     m_efb_color_cache.out_of_date = true;
   if (m_efb_depth_cache.valid)
@@ -559,6 +631,9 @@ void FramebufferManager::FlagPeekCacheAsOutOfDate()
 
 void FramebufferManager::EndOfFrame()
 {
+  std::scoped_lock lock(m_mutex);
+  return;
+
   if (!IsUsingTiledEFBCache())
     return;
 
@@ -787,12 +862,8 @@ void FramebufferManager::PopulateEFBCache(bool depth, u32 tile_index, bool async
   if (!async)
   {
     data.readback_texture->Flush();
-    data.needs_flush = false;
   }
-  else
-  {
-    data.needs_flush = true;
-  }
+
   data.valid = true;
   data.out_of_date = false;
   if (IsUsingTiledEFBCache())

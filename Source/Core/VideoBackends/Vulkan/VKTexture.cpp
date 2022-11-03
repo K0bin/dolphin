@@ -941,12 +941,27 @@ void VKStagingTexture::CopyToTexture(const MathUtil::Rectangle<int>& src_rect, A
   // Restore old source texture layout.
   dst_tex->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(), old_layout);
 
-  m_needs_flush = true;
   m_flush_fence_counter = g_command_buffer_mgr->GetCurrentFenceCounter();
+  m_needs_flush = true;
 }
 
 bool VKStagingTexture::Map()
 {
+  ASSERT(!m_needs_flush);
+
+  if (g_command_buffer_mgr->GetCompletedFenceCounter() >= m_flush_fence_counter)
+  {
+    g_command_buffer_mgr->WaitForFenceCounter(m_flush_fence_counter);
+    m_needs_invalidate = true;
+  }
+
+  if (m_needs_invalidate && (m_type == StagingTextureType::Readback || m_type == StagingTextureType::Mutable))
+  {
+    // For readback textures, invalidate the CPU cache as there is new data there.
+    m_staging_buffer->InvalidateCPUCache();
+    m_needs_invalidate = false;
+  }
+
   // Always mapped.
   return true;
 }
@@ -961,13 +976,14 @@ void VKStagingTexture::Flush()
   if (!m_needs_flush)
     return;
 
-  // Wait for the GPU to finish with it.
-  g_command_buffer_mgr->WaitForFenceCounter(m_flush_fence_counter);
+  // Is this copy in the current command buffer?
+  if (m_flush_fence_counter == g_command_buffer_mgr->GetCurrentFenceCounter())
+  {
+      // Execute the command buffer and wait for it to finish.
+     Renderer::GetInstance()->ExecuteCommandBuffer(true, false);
+  }
 
-  // For readback textures, invalidate the CPU cache as there is new data there.
-  if (m_type == StagingTextureType::Readback || m_type == StagingTextureType::Mutable)
-    m_staging_buffer->InvalidateCPUCache();
-
+  m_needs_invalidate = true;
   m_needs_flush = false;
 }
 

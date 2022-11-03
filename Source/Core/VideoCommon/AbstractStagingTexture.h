@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <string>
+#include <atomic>
 
 #include "Common/CommonTypes.h"
 #include "Common/MathUtil.h"
@@ -29,7 +30,8 @@ public:
   StagingTextureType GetType() const { return m_type; }
   size_t GetTexelSize() const { return m_texel_size; }
 
-  bool IsMapped() const { return m_map_pointer != nullptr; }
+  bool NeedsFlush() const { return m_needs_flush; }
+  virtual bool IsMapped() const { return m_map_pointer != nullptr; }
   char* GetMappedPointer() const { return m_map_pointer; }
   size_t GetMappedStride() const { return m_map_stride; }
   // Copies from the GPU texture object to the staging texture, which can be mapped/read by the CPU.
@@ -73,6 +75,8 @@ public:
   void ReadTexels(const MathUtil::Rectangle<int>& rect, void* out_ptr, u32 out_stride);
   void ReadTexel(u32 x, u32 y, void* out_ptr);
 
+  bool ReadTexelOffThread(u32 x, u32 y, void* out_ptr);
+
   // Copies the texels from in_ptr to the staging texture, which can be read by the GPU, with the
   // specified stride (length in bytes of each row). After updating the staging texture with all
   // changes, call CopyToTexture() to update the GPU copy.
@@ -81,6 +85,7 @@ public:
 
 protected:
   bool PrepareForAccess();
+  bool PrepareForAccessOffThread();
 
   const StagingTextureType m_type;
   const TextureConfig m_config;
@@ -89,5 +94,5 @@ protected:
   char* m_map_pointer = nullptr;
   size_t m_map_stride = 0;
 
-  bool m_needs_flush = false;
+  std::atomic<bool> m_needs_flush = false;
 };

@@ -236,6 +236,7 @@ struct VideoConfig final
     bool bSupportsPartialMultisampleResolve = false;
     bool bSupportsDynamicVertexLoader = false;
     bool bSupportsVSLinePointExpand = false;
+    bool bSupportsThreadSafeStagingTexture = false;
   } backend_info;
 
   // Utility

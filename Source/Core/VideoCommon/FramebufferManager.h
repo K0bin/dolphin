@@ -6,6 +6,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <mutex>
 
 #include "Common/CommonTypes.h"
 #include "Common/EnumFormatter.h"
@@ -16,6 +17,7 @@
 #include "VideoCommon/AbstractTexture.h"
 #include "VideoCommon/RenderState.h"
 #include "VideoCommon/TextureConfig.h"
+#include "PixelEngine.h"
 
 class NativeVertexFormat;
 class PointerWrap;
@@ -108,6 +110,9 @@ public:
   void PokeEFBDepth(u32 x, u32 y, float depth);
   void FlushEFBPokes();
 
+  bool TryPeekEFBColorFromCache(u32 x, u32 y, u32* out_color, PixelFormat* out_pixel_format, PixelEngine::AlphaReadMode* out_alpha_read_mode);
+  bool TryPeekEFBDepthFromCache(u32 x, u32 y, float* out_depth, PixelFormat* out_pixel_format, DepthFormat* out_depth_format);
+
   // Save state load/save.
   void DoState(PointerWrap& p);
 
@@ -136,7 +141,6 @@ protected:
     std::vector<EFBCacheTile> tiles;
     bool out_of_date;
     bool valid;
-    bool needs_flush;
   };
 
   bool CreateEFBFramebuffer();
@@ -207,6 +211,11 @@ protected:
   std::unique_ptr<AbstractPipeline> m_depth_poke_pipeline;
   std::vector<EFBPokeVertex> m_color_poke_vertices;
   std::vector<EFBPokeVertex> m_depth_poke_vertices;
+
+  std::recursive_mutex m_mutex;
+  PixelFormat m_pixel_format = PixelFormat::INVALID_FMT;
+  DepthFormat m_depth_format = DepthFormat::ZFAR;
+  PixelEngine::AlphaReadMode m_alpha_read_mode = PixelEngine::AlphaReadMode::ReadNone;
 };
 
 extern std::unique_ptr<FramebufferManager> g_framebuffer_manager;

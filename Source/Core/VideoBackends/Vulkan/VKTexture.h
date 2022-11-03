@@ -102,6 +102,10 @@ public:
                      const MathUtil::Rectangle<int>& dst_rect, u32 dst_layer,
                      u32 dst_level) override;
 
+  bool IsMapped() const override {
+    return !m_needs_invalidate;
+  }
+
   bool Map() override;
   void Unmap() override;
   void Flush() override;
@@ -120,7 +124,8 @@ private:
   std::unique_ptr<StagingBuffer> m_staging_buffer;
   VkImage m_linear_image = VK_NULL_HANDLE;
   VmaAllocation m_linear_image_alloc = VK_NULL_HANDLE;
-  u64 m_flush_fence_counter = 0;
+  std::atomic<u64> m_flush_fence_counter = 0;
+  std::atomic<u64> m_needs_invalidate = false;
 };
 
 class VKFramebuffer final : public AbstractFramebuffer

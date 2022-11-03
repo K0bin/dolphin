@@ -77,6 +77,17 @@ void AbstractStagingTexture::ReadTexel(u32 x, u32 y, void* out_ptr)
   std::memcpy(out_ptr, src_ptr, m_texel_size);
 }
 
+bool AbstractStagingTexture::ReadTexelOffThread(u32 x, u32 y, void* out_ptr)
+{
+  ASSERT(m_type != StagingTextureType::Upload);
+  if (!PrepareForAccessOffThread())
+    return false;
+
+  ASSERT(x < m_config.width && y < m_config.height);
+  const char* src_ptr = m_map_pointer + y * m_map_stride + x * m_texel_size;
+  std::memcpy(out_ptr, src_ptr, m_texel_size);
+}
+
 void AbstractStagingTexture::WriteTexels(const MathUtil::Rectangle<int>& rect, const void* in_ptr,
                                          u32 in_stride)
 {
@@ -128,6 +139,15 @@ bool AbstractStagingTexture::PrepareForAccess()
     if (IsMapped())
       Unmap();
     Flush();
+  }
+  return IsMapped() || Map();
+}
+
+bool AbstractStagingTexture::PrepareForAccessOffThread()
+{
+  if (m_needs_flush)
+  {
+    return false;
   }
   return IsMapped() || Map();
 }

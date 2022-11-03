@@ -87,6 +87,7 @@
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
+#include "VideoConfig.h"
 
 std::unique_ptr<Renderer> g_renderer;
 
@@ -321,6 +322,91 @@ u32 Renderer::AccessEFB(EFBAccessType type, u32 x, u32 y, u32 poke_data)
     }
 
     return z24depth;
+  }
+}
+
+bool Renderer::TryAccessEFBOffThread(EFBAccessType type, u32 x, u32 y, u32* out_data)
+{
+  if (!g_ActiveConfig.backend_info.bSupportsThreadSafeStagingTexture)
+    return false;
+
+  if (type == EFBAccessType::PeekColor)
+  {
+    u32 color;
+    PixelFormat pixel_format;
+    PixelEngine::AlphaReadMode alpha_read_mode;
+
+    if (!g_framebuffer_manager->TryPeekEFBColorFromCache(x, y, &color, &pixel_format, &alpha_read_mode))
+      return false;
+
+    // a little-endian value is expected to be returned
+    color = ((color & 0xFF00FF00) | ((color >> 16) & 0xFF) | ((color << 16) & 0xFF0000));
+
+    if (pixel_format == PixelFormat::RGBA6_Z24)
+    {
+      color = RGBA8ToRGBA6ToRGBA8(color);
+    }
+    else if (pixel_format == PixelFormat::RGB565_Z16)
+    {
+      color = RGBA8ToRGB565ToRGBA8(color);
+    }
+    if (pixel_format != PixelFormat::RGBA6_Z24)
+    {
+      color |= 0xFF000000;
+    }
+
+    // check what to do with the alpha channel (GX_PokeAlphaRead)
+
+    if (alpha_read_mode == PixelEngine::AlphaReadMode::ReadNone)
+    {
+      *out_data = color;
+    }
+    else if (alpha_read_mode == PixelEngine::AlphaReadMode::ReadFF)
+    {
+      *out_data = color | 0xFF000000;
+    }
+    else
+    {
+      if (alpha_read_mode != PixelEngine::AlphaReadMode::Read00)
+      {
+        PanicAlertFmt("Invalid PE alpha read mode: {}", static_cast<u16>(alpha_read_mode));
+      }
+      *out_data = color & 0x00FFFFFF;
+    }
+    return true;
+  }
+  else  // if (type == EFBAccessType::PeekZ)
+  {
+    // Depth buffer is inverted for improved precision near far plane
+    PixelFormat pixel_format;
+    DepthFormat depth_format;
+    float depth;
+
+    if (!g_framebuffer_manager->TryPeekEFBDepthFromCache(x, y, &depth, &pixel_format, &depth_format))
+      return false;
+
+    if (!g_ActiveConfig.backend_info.bSupportsReversedDepthRange)
+      depth = 1.0f - depth;
+
+    // Convert to 24bit depth
+    u32 z24depth = std::clamp<u32>(static_cast<u32>(depth * 16777216.0f), 0, 0xFFFFFF);
+
+    if (pixel_format == PixelFormat::RGB565_Z16)
+    {
+      // When in RGB565_Z16 mode, EFB Z peeks return a 16bit value, which is presumably a
+      // resolved sample from the MSAA buffer.
+      // Dolphin doesn't currently emulate the 3 sample MSAA mode (and potentially never will)
+      // it just transparently upgrades the framebuffer to 24bit depth and color and whatever
+      // level of MSAA and higher Internal Resolution the user has configured.
+
+      // This is mostly transparent, unless the game does an EFB read.
+      // But we can simply convert the 24bit depth on the fly to the 16bit depth the game expects.
+
+      return CompressZ16(z24depth, depth_format);
+    }
+
+    *out_data = z24depth;
+    return true;
   }
 }
 
