@@ -959,6 +959,8 @@ void FramebufferManager::DestroyClearPipelines()
 
 void FramebufferManager::PokeEFBColor(u32 x, u32 y, u32 color)
 {
+  std::scoped_lock lock(m_mutex);
+
   // Flush if we exceeded the number of vertices per batch.
   if ((m_color_poke_vertices.size() + 6) > MAX_POKE_VERTICES)
     FlushEFBPokes();
@@ -977,6 +979,8 @@ void FramebufferManager::PokeEFBColor(u32 x, u32 y, u32 color)
 
 void FramebufferManager::PokeEFBDepth(u32 x, u32 y, float depth)
 {
+  std::scoped_lock lock(m_mutex);
+
   // Flush if we exceeded the number of vertices per batch.
   if ((m_depth_poke_vertices.size() + 6) > MAX_POKE_VERTICES)
     FlushEFBPokes();
