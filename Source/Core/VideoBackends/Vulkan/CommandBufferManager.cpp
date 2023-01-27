@@ -25,8 +25,7 @@ CommandBufferManager::~CommandBufferManager()
   if (m_use_threaded_submission)
   {
     WaitForWorkerThreadIdle();
-    m_submit_loop->Stop();
-    m_submit_thread.join();
+    m_submit_thread.Shutdown();
   }
 
   DestroyCommandBuffers();
@@ -217,32 +216,11 @@ VkDescriptorSet CommandBufferManager::AllocateDescriptorSet(VkDescriptorSetLayou
 
 bool CommandBufferManager::CreateSubmitThread()
 {
-  m_submit_loop = std::make_unique<Common::BlockingLoop>();
-  m_submit_thread = std::thread([this]() {
-    Common::SetCurrentThreadName("Vulkan CommandBufferManager SubmitThread");
-
-    m_submit_loop->Run([this]() {
-      while (true)
-      {
-        PendingCommandBufferSubmit submit;
-        {
-          std::lock_guard<std::mutex> guard(m_pending_submit_lock);
-          if (m_pending_submits.empty())
-          {
-            m_submit_loop->AllowSleep();
-            return;
-          }
-
-          submit = m_pending_submits.front();
-          m_pending_submits.pop_front();
-        }
-
-        SubmitCommandBuffer(submit.command_buffer_index, submit.present_swap_chain,
-                            submit.present_image_index);
-        CmdBufferResources& resources = m_command_buffers[submit.command_buffer_index];
-        resources.waiting_for_submit.store(false, std::memory_order_release);
-      }
-    });
+  m_submit_thread.Reset([this](PendingCommandBufferSubmit submit) {
+      SubmitCommandBuffer(submit.command_buffer_index, submit.present_swap_chain,
+                          submit.present_image_index);
+      CmdBufferResources& resources = m_command_buffers[submit.command_buffer_index];
+      resources.waiting_for_submit.store(false, std::memory_order_release);
   });
 
   return true;
@@ -253,7 +231,7 @@ void CommandBufferManager::WaitForWorkerThreadIdle()
   if (!m_use_threaded_submission)
     return;
 
-  m_submit_loop->Wait();
+  m_submit_thread.Flush();
 }
 
 void CommandBufferManager::WaitForFenceCounter(u64 fence_counter)
@@ -339,12 +317,7 @@ void CommandBufferManager::SubmitCommandBuffer(bool submit_on_worker_thread,
   {
     resources.waiting_for_submit.store(true, std::memory_order_relaxed);
     // Push to the pending submit queue.
-    {
-      std::lock_guard<std::mutex> guard(m_pending_submit_lock);
-      m_pending_submits.push_back({present_swap_chain, present_image_index, m_current_cmd_buffer});
-      // Wake up the worker thread for a single iteration.
-      m_submit_loop->Wakeup();
-    }
+    m_submit_thread.Push({present_swap_chain, present_image_index, m_current_cmd_buffer});
   }
   else
   {
