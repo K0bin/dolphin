@@ -128,6 +128,8 @@ public:
   // Re-creates the root signature. Call when the host config changes (e.g. bbox/per-pixel shading).
   void RecreateGXRootSignature();
 
+  void PrintDeviceLostDebug();
+
 private:
   // Number of command lists. One is being built while the other(s) are executed.
   static const u32 NUM_COMMAND_LISTS = 3;

@@ -197,6 +197,13 @@ bool DXContext::CreateDevice(u32 adapter_index, bool enable_debug_layer)
       filter.DenyList.pIDList = id_list.data();
       info_queue->PushStorageFilter(&filter);
     }
+
+    ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dred_settings;
+    if (SUCCEEDED(D3D12GetDebugInterface(__uuidof(ID3D12DeviceRemovedExtendedDataSettings), &dred_settings)))
+    {
+      dred_settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+      dred_settings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+    }
   }
 
   return true;
@@ -570,6 +577,86 @@ void DXContext::WaitForFence(u64 fence)
 
     DestroyPendingResources(res);
     index = (index + 1) % NUM_COMMAND_LISTS;
+  }
+}
+
+void DXContext::PrintDeviceLostDebug()
+{
+  ComPtr<ID3D12DeviceRemovedExtendedData2> dred_data;
+  if (SUCCEEDED(m_device->QueryInterface(
+          __uuidof(ID3D12DeviceRemovedExtendedData2), &dred_data)))
+  {
+    D3D12_DRED_DEVICE_STATE state = dred_data->GetDeviceState();
+    ERROR_LOG_FMT(HOST_GPU, "Device hung state: {}", (u32)state);
+
+    D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 output = {};
+    if (SUCCEEDED(dred_data->GetAutoBreadcrumbsOutput1(&output)))
+    {
+      const D3D12_AUTO_BREADCRUMB_NODE1* current = output.pHeadAutoBreadcrumbNode;
+      while (current != nullptr)
+      {
+        ERROR_LOG_FMT(HOST_GPU, "Breadcrumb node");
+        for (u32 i = 0; i < current->BreadcrumbCount; i++)
+        {
+          if (i == *current->pLastBreadcrumbValue)
+          {
+            ERROR_LOG_FMT(HOST_GPU, "LAST BREADCRUMB: {}", (u32)current->pCommandHistory[i]);
+          }
+          else
+          {
+            ERROR_LOG_FMT(HOST_GPU, "Breadcrumb cmd: {}", (u32)current->pCommandHistory[i]);
+          }
+
+          for (u32 j = 0; j < current->BreadcrumbContextsCount; j++)
+          {
+            D3D12_DRED_BREADCRUMB_CONTEXT* context = &current->pBreadcrumbContexts[j];
+            if (context->BreadcrumbIndex == i)
+            {
+              std::wstring contextWStr(context->pContextString);
+              std::string contextStr(contextWStr.begin(), contextWStr.end());
+              ERROR_LOG_FMT(HOST_GPU, "Breadcrumb context. Index: {}: {}", context->BreadcrumbIndex,
+                            contextStr);
+              break;
+            }
+          }
+        }
+
+        current = current->pNext;
+      }
+    }
+    else
+    {
+      ERROR_LOG_FMT(HOST_GPU, "Reading breadcrumbs failed");
+    }
+
+    D3D12_DRED_PAGE_FAULT_OUTPUT2 page_faults = {};
+    if (SUCCEEDED(dred_data->GetPageFaultAllocationOutput2(&page_faults)))
+    {
+      ERROR_LOG_FMT(HOST_GPU, "Page fault VA: {}", page_faults.PageFaultVA);
+
+      const D3D12_DRED_ALLOCATION_NODE1* current = page_faults.pHeadRecentFreedAllocationNode;
+      while (current != nullptr)
+      {
+        ComPtr<ID3D12Resource> resource;
+        if (SUCCEEDED(const_cast<IUnknown*>(current->pObject)
+                          ->QueryInterface(__uuidof(ID3D12Resource), &resource)))
+        {
+          ERROR_LOG_FMT(HOST_GPU, "Recently freed name: {}, type: {}, va: {}", current->ObjectNameA,
+                        (u32)current->AllocationType, resource->GetGPUVirtualAddress());
+        }
+        else
+        {
+          ERROR_LOG_FMT(HOST_GPU, "Recently freed name: {}, type: {}", current->ObjectNameA,
+                        (u32)current->AllocationType);
+        }
+
+        current = current->pNext;
+      }
+    }
+    else
+    {
+      ERROR_LOG_FMT(HOST_GPU, "Reading page fault failed");
+    }
   }
 }
 }  // namespace DX12

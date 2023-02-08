@@ -103,6 +103,11 @@ bool D3D12BoundingBox::CreateBuffers()
   HRESULT hr = g_dx_context->GetDevice()->CreateCommittedResource(
       &gpu_heap_properties, D3D12_HEAP_FLAG_NONE, &buffer_desc, D3D12_RESOURCE_STATE_COMMON,
       nullptr, IID_PPV_ARGS(&m_gpu_buffer));
+  if (hr == DXGI_ERROR_DEVICE_HUNG)[[unlikely]]
+  {
+    g_dx_context->PrintDeviceLostDebug();
+  }
+
   ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Creating bounding box GPU buffer failed: {}", DX12HRWrap(hr));
   if (FAILED(hr) || !g_dx_context->GetDescriptorHeapManager().Allocate(&m_gpu_descriptor))
     return false;
@@ -116,6 +121,11 @@ bool D3D12BoundingBox::CreateBuffers()
   hr = g_dx_context->GetDevice()->CreateCommittedResource(
       &cpu_heap_properties, D3D12_HEAP_FLAG_NONE, &buffer_desc, D3D12_RESOURCE_STATE_COPY_DEST,
       nullptr, IID_PPV_ARGS(&m_readback_buffer));
+  if (hr == DXGI_ERROR_DEVICE_HUNG) [[unlikely]]
+  {
+    g_dx_context->PrintDeviceLostDebug();
+  }
+
   ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Creating bounding box CPU buffer failed: {}", DX12HRWrap(hr));
   if (FAILED(hr))
     return false;

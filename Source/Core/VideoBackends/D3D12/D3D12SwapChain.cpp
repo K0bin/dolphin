@@ -71,7 +71,10 @@ void SwapChain::DestroySwapChainBuffers()
 bool SwapChain::Present()
 {
   if (!D3DCommon::SwapChain::Present())
+  {
+    g_dx_context->PrintDeviceLostDebug();
     return false;
+  }
 
   m_current_buffer = (m_current_buffer + 1) % SWAP_CHAIN_BUFFER_COUNT;
   return true;

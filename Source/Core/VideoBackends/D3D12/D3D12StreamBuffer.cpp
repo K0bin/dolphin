@@ -46,6 +46,10 @@ bool StreamBuffer::AllocateBuffer(u32 size)
   HRESULT hr = g_dx_context->GetDevice()->CreateCommittedResource(
       &heap_properties, D3D12_HEAP_FLAG_NONE, &resource_desc, D3D12_RESOURCE_STATE_GENERIC_READ,
       nullptr, IID_PPV_ARGS(&m_buffer));
+  if (hr == DXGI_ERROR_DEVICE_HUNG) [[unlikely]]
+  {
+    g_dx_context->PrintDeviceLostDebug();
+  }
   ASSERT_MSG(VIDEO, SUCCEEDED(hr), "Failed to allocate buffer of size {}: {}", size,
              DX12HRWrap(hr));
   if (FAILED(hr))
