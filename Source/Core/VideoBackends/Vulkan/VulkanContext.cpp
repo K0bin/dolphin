@@ -437,6 +437,29 @@ void VulkanContext::PopulateBackendInfoFeatures(VideoConfig* config, VkPhysicalD
   {
     config->backend_info.bSupportsFramebufferFetch = true;
   }
+  else
+  {
+      u32 extension_count;
+      VkResult res =
+              vkEnumerateDeviceExtensionProperties(gpu, nullptr, &extension_count, nullptr);
+      std::vector<VkExtensionProperties> available_extension_list(extension_count);
+
+      if (res == VK_SUCCESS)
+      {
+          res = vkEnumerateDeviceExtensionProperties(gpu, nullptr, &extension_count,
+                                                     available_extension_list.data());
+          if (res == VK_SUCCESS)
+          {
+              auto ExtensionSupported = [&](const char* name) {
+                  return std::any_of(available_extension_list.begin(), available_extension_list.end(),
+                              [name](const VkExtensionProperties& extension) { return extension.extensionName == name; });
+              };
+
+              config->backend_info.bSupportsFramebufferFetch = ExtensionSupported("VK_ARM_rasterization_order_attachment_access")
+                                                                || ExtensionSupported("VK_EXT_rasterization_order_attachment_access");
+          }
+      }
+  }
 
   // Our usage of primitive restart appears to be broken on AMD's binary drivers.
   // Seems to be fine on GCN Gen 1-2, unconfirmed on GCN Gen 3, causes driver resets on GCN Gen 4.
@@ -583,6 +606,8 @@ bool VulkanContext::SelectDeviceExtensions(bool enable_surface)
 
   AddExtension(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, false);
   AddExtension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, false);
+  if (!AddExtension("VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS", false))
+      AddExtension("VK_ARM_RASTERIZATION_ORDER_ATTACHMENT_ACCESS", false);
 
   return true;
 }

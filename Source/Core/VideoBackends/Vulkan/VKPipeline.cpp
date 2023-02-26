@@ -239,9 +239,13 @@ std::unique_ptr<VKPipeline> VKPipeline::Create(const AbstractPipelineConfig& con
 {
   DEBUG_ASSERT(config.vertex_shader && config.pixel_shader);
 
+  bool use_framebuffer_fetch = !g_ActiveConfig.backend_info.bSupportsDualSourceBlend && g_ActiveConfig.backend_info.bSupportsFramebufferFetch;
+
+  VkFormat color_format = VKTexture::GetVkFormatForHostTextureFormat(config.framebuffer_state.color_texture_format);
+
   // Get render pass for config.
   VkRenderPass render_pass = g_object_cache->GetRenderPass(
-      VKTexture::GetVkFormatForHostTextureFormat(config.framebuffer_state.color_texture_format),
+          color_format,
       VKTexture::GetVkFormatForHostTextureFormat(config.framebuffer_state.depth_texture_format),
       config.framebuffer_state.samples, VK_ATTACHMENT_LOAD_OP_LOAD);
 
@@ -250,10 +254,16 @@ std::unique_ptr<VKPipeline> VKPipeline::Create(const AbstractPipelineConfig& con
   switch (config.usage)
   {
   case AbstractPipelineUsage::GX:
-    pipeline_layout = g_object_cache->GetPipelineLayout(PIPELINE_LAYOUT_STANDARD);
+    if (use_framebuffer_fetch && color_format != VK_FORMAT_UNDEFINED)
+        pipeline_layout = g_object_cache->GetPipelineLayout(PIPELINE_LAYOUT_STANDARD);
+    else
+        pipeline_layout = g_object_cache->GetPipelineLayout(PIPELINE_LAYOUT_STANDARD_FB_FETCH);
     break;
   case AbstractPipelineUsage::GXUber:
-    pipeline_layout = g_object_cache->GetPipelineLayout(PIPELINE_LAYOUT_UBER);
+    if (use_framebuffer_fetch && color_format != VK_FORMAT_UNDEFINED)
+        pipeline_layout = g_object_cache->GetPipelineLayout(PIPELINE_LAYOUT_UBER);
+    else
+        pipeline_layout = g_object_cache->GetPipelineLayout(PIPELINE_LAYOUT_UBER_FB_FETCH);
     break;
   case AbstractPipelineUsage::Utility:
     pipeline_layout = g_object_cache->GetPipelineLayout(PIPELINE_LAYOUT_UTILITY);

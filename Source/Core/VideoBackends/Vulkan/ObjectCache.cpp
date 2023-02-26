@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <type_traits>
+#include <VideoCommon/VideoConfig.h>
 
 #include "Common/Assert.h"
 #include "Common/CommonFuncs.h"
@@ -119,9 +120,11 @@ bool ObjectCache::CreateDescriptorSetLayouts()
        VK_SHADER_STAGE_GEOMETRY_BIT},
   }};
 
-  static const std::array<VkDescriptorSetLayoutBinding, 1> standard_sampler_bindings{{
+  static const std::array<VkDescriptorSetLayoutBinding, 2> standard_sampler_bindings{{
       {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
        static_cast<u32>(VideoCommon::MAX_PIXEL_SHADER_SAMPLERS), VK_SHADER_STAGE_FRAGMENT_BIT},
+      {8, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+       1, VK_SHADER_STAGE_FRAGMENT_BIT},
   }};
 
   // The dynamic veretex loader's vertex buffer must be last here, for similar reasons
@@ -162,6 +165,8 @@ bool ObjectCache::CreateDescriptorSetLayouts()
   std::array<VkDescriptorSetLayoutCreateInfo, NUM_DESCRIPTOR_SET_LAYOUTS> create_infos{{
       {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, nullptr, 0,
        static_cast<u32>(ubo_bindings.size()), ubo_bindings.data()},
+      {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, nullptr, 0,
+       1, standard_sampler_bindings.data()},
       {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, nullptr, 0,
        static_cast<u32>(standard_sampler_bindings.size()), standard_sampler_bindings.data()},
       {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, nullptr, 0,
@@ -229,6 +234,16 @@ bool ObjectCache::CreatePipelineLayouts()
       m_descriptor_set_layouts[DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS],
       m_descriptor_set_layouts[DESCRIPTOR_SET_LAYOUT_STANDARD_SHADER_STORAGE_BUFFERS],
   };
+  const std::array<VkDescriptorSetLayout, 3> standard_sets_fb_fetch{
+      m_descriptor_set_layouts[DESCRIPTOR_SET_LAYOUT_STANDARD_UNIFORM_BUFFERS],
+      m_descriptor_set_layouts[DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS_FB_FETCH],
+      m_descriptor_set_layouts[DESCRIPTOR_SET_LAYOUT_STANDARD_SHADER_STORAGE_BUFFERS],
+  };
+  const std::array<VkDescriptorSetLayout, 3> uber_sets_fb_fetch{
+      m_descriptor_set_layouts[DESCRIPTOR_SET_LAYOUT_STANDARD_UNIFORM_BUFFERS],
+      m_descriptor_set_layouts[DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS_FB_FETCH],
+      m_descriptor_set_layouts[DESCRIPTOR_SET_LAYOUT_STANDARD_SHADER_STORAGE_BUFFERS],
+  };
   const std::array<VkDescriptorSetLayout, 2> utility_sets{
       m_descriptor_set_layouts[DESCRIPTOR_SET_LAYOUT_UTILITY_UNIFORM_BUFFER],
       m_descriptor_set_layouts[DESCRIPTOR_SET_LAYOUT_UTILITY_SAMPLERS],
@@ -246,6 +261,14 @@ bool ObjectCache::CreatePipelineLayouts()
       // Uber
       {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, nullptr, 0,
        static_cast<u32>(uber_sets.size()), uber_sets.data(), 0, nullptr},
+
+      // Standard
+      {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, nullptr, 0,
+       static_cast<u32>(standard_sets_fb_fetch.size()), standard_sets_fb_fetch.data(), 0, nullptr},
+
+      // Uber
+      {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, nullptr, 0,
+       static_cast<u32>(uber_sets_fb_fetch.size()), uber_sets_fb_fetch.data(), 0, nullptr},
 
       // Utility
       {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, nullptr, 0,
@@ -401,6 +424,7 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
   VkAttachmentReference* depth_reference_ptr = nullptr;
   std::array<VkAttachmentDescription, 2> attachments;
   u32 num_attachments = 0;
+  bool use_framebuffer_fetch = color_format != VK_FORMAT_UNDEFINED && !g_ActiveConfig.backend_info.bSupportsDualSourceBlend && g_ActiveConfig.backend_info.bSupportsFramebufferFetch;
   if (color_format != VK_FORMAT_UNDEFINED)
   {
     attachments[num_attachments] = {0,
@@ -413,7 +437,7 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
                                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
     color_reference.attachment = num_attachments;
-    color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color_reference.layout = use_framebuffer_fetch ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     color_reference_ptr = &color_reference;
     num_attachments++;
   }
@@ -436,10 +460,10 @@ VkRenderPass ObjectCache::GetRenderPass(VkFormat color_format, VkFormat depth_fo
 
   VkSubpassDescription subpass = {0,
                                   VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                  0,
-                                  nullptr,
+                                  color_reference_ptr != nullptr && use_framebuffer_fetch ? 1u : 0u,
+                                  use_framebuffer_fetch ? color_reference_ptr : nullptr,
                                   color_reference_ptr ? 1u : 0u,
-                                  color_reference_ptr ? color_reference_ptr : nullptr,
+                                  color_reference_ptr,
                                   nullptr,
                                   depth_reference_ptr,
                                   0,

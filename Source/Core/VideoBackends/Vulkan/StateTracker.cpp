@@ -113,6 +113,10 @@ void StateTracker::SetFramebuffer(VKFramebuffer* framebuffer)
   // Should not be changed within a render pass.
   ASSERT(!InRenderPass());
   m_framebuffer = framebuffer;
+
+  bool use_framebuffer_fetch = !g_ActiveConfig.backend_info.bSupportsDualSourceBlend && g_ActiveConfig.backend_info.bSupportsFramebufferFetch;
+  if (use_framebuffer_fetch)
+    m_dirty_flags |= DIRTY_FLAG_DESCRIPTOR_SETS;
 }
 
 void StateTracker::SetPipeline(const VKPipeline* pipeline)
@@ -454,10 +458,11 @@ void StateTracker::UpdateDescriptorSet()
 void StateTracker::UpdateGXDescriptorSet()
 {
   const size_t MAX_DESCRIPTOR_WRITES = NUM_UBO_DESCRIPTOR_SET_BINDINGS +  // UBO
-                                       1 +                                // Samplers
+                                       2 +                                // Samplers
                                        2;                                 // SSBO
   std::array<VkWriteDescriptorSet, MAX_DESCRIPTOR_WRITES> writes;
   u32 num_writes = 0;
+  VkDescriptorImageInfo fbFetchImage;
 
   const bool needs_gs_ubo = g_ActiveConfig.backend_info.bSupportsGeometryShaders ||
                             g_ActiveConfig.UseVSForLinePointExpand();
@@ -491,8 +496,12 @@ void StateTracker::UpdateGXDescriptorSet()
 
   if (m_dirty_flags & DIRTY_FLAG_GX_SAMPLERS || m_gx_descriptor_sets[1] == VK_NULL_HANDLE)
   {
+    VKTexture* color = static_cast<VKTexture*>(m_framebuffer->GetColorAttachment());
+    bool use_framebuffer_fetch = !g_ActiveConfig.backend_info.bSupportsDualSourceBlend && g_ActiveConfig.backend_info.bSupportsFramebufferFetch && color != nullptr;
+    DESCRIPTOR_SET_LAYOUT layout_type = use_framebuffer_fetch ? DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS_FB_FETCH : DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS;
+
     m_gx_descriptor_sets[1] = g_command_buffer_mgr->AllocateDescriptorSet(
-        g_object_cache->GetDescriptorSetLayout(DESCRIPTOR_SET_LAYOUT_STANDARD_SAMPLERS));
+        g_object_cache->GetDescriptorSetLayout(layout_type));
 
     writes[num_writes++] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                             nullptr,
@@ -504,6 +513,24 @@ void StateTracker::UpdateGXDescriptorSet()
                             m_bindings.samplers.data(),
                             nullptr,
                             nullptr};
+
+    if (use_framebuffer_fetch)
+    {
+      fbFetchImage = {VK_NULL_HANDLE,
+                      color->GetView(),
+                      VK_IMAGE_LAYOUT_GENERAL};
+
+      writes[num_writes++] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                              nullptr,
+                              m_gx_descriptor_sets[1],
+                              0,
+                              0,
+                              1,
+                              VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+                              &fbFetchImage,
+                              nullptr,
+                              nullptr};
+    }
     m_dirty_flags = (m_dirty_flags & ~DIRTY_FLAG_GX_SAMPLERS) | DIRTY_FLAG_DESCRIPTOR_SETS;
   }
 

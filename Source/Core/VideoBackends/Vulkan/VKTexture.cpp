@@ -1066,9 +1066,10 @@ void VKFramebuffer::TransitionForRender()
 {
   if (m_color_attachment)
   {
+    bool use_fragment_fetch = !g_ActiveConfig.backend_info.bSupportsDualSourceBlend && g_ActiveConfig.backend_info.bSupportsFramebufferFetch;
     static_cast<VKTexture*>(m_color_attachment)
         ->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(),
-                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+                             use_fragment_fetch ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL);
   }
 
   if (m_depth_attachment)

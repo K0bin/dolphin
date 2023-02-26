@@ -154,8 +154,9 @@ VkDescriptorPool CommandBufferManager::CreateDescriptorPool(u32 max_descriptor_s
    * STORAGE_BUFFER: 2
    * UNIFORM_TEXEL_BUFFER: 3
    * STORAGE_IMAGE: 1
+   * INPUT_ATTACHMENT: 1
    */
-  const std::array<VkDescriptorPoolSize, 5> pool_sizes{{
+  const std::array<VkDescriptorPoolSize, 6> pool_sizes{{
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, max_descriptor_sets * 3},
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
        max_descriptor_sets * (VideoCommon::MAX_PIXEL_SHADER_SAMPLERS + NUM_COMPUTE_SHADER_SAMPLERS +
@@ -163,6 +164,7 @@ VkDescriptorPool CommandBufferManager::CreateDescriptorPool(u32 max_descriptor_s
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, max_descriptor_sets * 2},
       {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, max_descriptor_sets * 3},
       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, max_descriptor_sets * 1},
+      {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, max_descriptor_sets * 1},
   }};
 
   const VkDescriptorPoolCreateInfo pool_create_info = {
