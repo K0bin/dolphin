@@ -38,7 +38,8 @@ public:
   static void PopulateBackendInfoAdapters(VideoConfig* config, const GPUList& gpu_list);
   static void PopulateBackendInfoFeatures(VideoConfig* config, VkPhysicalDevice gpu,
                                           const VkPhysicalDeviceProperties& properties,
-                                          const VkPhysicalDeviceFeatures& features);
+                                          const VkPhysicalDeviceFeatures& features,
+                                          const VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT& raster_order_attachment_access_features);
   static void PopulateBackendInfoMultisampleModes(VideoConfig* config, VkPhysicalDevice gpu,
                                                   const VkPhysicalDeviceProperties& properties);
 
@@ -124,6 +125,8 @@ private:
   void PopulateShaderSubgroupSupport();
   bool CreateAllocator(u32 vk_api_version);
 
+  u32 m_api_version = VK_VERSION_1_0;
+
   VkInstance m_instance = VK_NULL_HANDLE;
   VkPhysicalDevice m_physical_device = VK_NULL_HANDLE;
   VkDevice m_device = VK_NULL_HANDLE;
@@ -140,6 +143,7 @@ private:
   VkPhysicalDeviceFeatures m_device_features = {};
   VkPhysicalDeviceProperties m_device_properties = {};
   VkPhysicalDeviceMemoryProperties m_device_memory_properties = {};
+  VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT m_raster_order_attachment_access_features = {};
 
   u32 m_shader_subgroup_size = 1;
   bool m_supports_shader_subgroup_operations = false;

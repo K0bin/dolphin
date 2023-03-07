@@ -55,10 +55,54 @@ void VideoBackend::InitBackendInfo()
 
           VkPhysicalDevice gpu = gpu_list[device_index];
           VkPhysicalDeviceProperties properties;
-          vkGetPhysicalDeviceProperties(gpu, &properties);
           VkPhysicalDeviceFeatures features;
-          vkGetPhysicalDeviceFeatures(gpu, &features);
-          VulkanContext::PopulateBackendInfoFeatures(&g_Config, gpu, properties, features);
+          VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT rasterOrderAttachmentAccessFeatures = {};
+          rasterOrderAttachmentAccessFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT;
+
+          u32 extension_count;
+          VkResult res =
+                vkEnumerateDeviceExtensionProperties(gpu, nullptr, &extension_count, nullptr);
+          std::vector<VkExtensionProperties> available_extension_list(extension_count);
+
+          if (res == VK_SUCCESS)
+          {
+            res = vkEnumerateDeviceExtensionProperties(gpu, nullptr, &extension_count,
+                                                       available_extension_list.data());
+            if (res != VK_SUCCESS)
+            {
+                available_extension_list.clear();
+            }
+          }
+
+          auto ExtensionSupported = [&](const char* name) {
+            return std::any_of(available_extension_list.begin(), available_extension_list.end(),
+                               [name](const VkExtensionProperties& extension) { return extension.extensionName == name; });
+          };
+
+          if (vkGetPhysicalDeviceFeatures2 && VK_VERSION_MAJOR(vk_api_version) == 1 &&
+                                        VK_VERSION_MINOR(vk_api_version) >= 1 || ExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME))
+          {
+              VkPhysicalDeviceProperties2 properties2 = {};
+              properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+              VkPhysicalDeviceFeatures2 features2 = {};
+              features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+
+              if (ExtensionSupported(VK_ARM_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME) || ExtensionSupported(VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME))
+                features2.pNext = &rasterOrderAttachmentAccessFeatures;
+
+              vkGetPhysicalDeviceProperties2(gpu, &properties2);
+              vkGetPhysicalDeviceFeatures2(gpu, &features2);
+
+              properties = properties2.properties;
+              features = features2.features;
+          }
+          else
+          {
+              vkGetPhysicalDeviceProperties(gpu, &properties);
+              vkGetPhysicalDeviceFeatures(gpu, &features);
+          }
+
+          VulkanContext::PopulateBackendInfoFeatures(&g_Config, gpu, properties, features, rasterOrderAttachmentAccessFeatures);
           VulkanContext::PopulateBackendInfoMultisampleModes(&g_Config, gpu, properties);
         }
       }

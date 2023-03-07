@@ -22,8 +22,8 @@ static constexpr const char* VALIDATION_LAYER_NAME = "VK_LAYER_KHRONOS_validatio
 
 std::unique_ptr<VulkanContext> g_vulkan_context;
 
-VulkanContext::VulkanContext(VkInstance instance, VkPhysicalDevice physical_device)
-    : m_instance(instance), m_physical_device(physical_device)
+VulkanContext::VulkanContext(VkInstance instance, VkPhysicalDevice physical_device, u32 api_version)
+    : m_instance(instance), m_physical_device(physical_device), m_api_version(api_version)
 {
   // Read device physical memory properties, we need it for allocating buffers
   vkGetPhysicalDeviceProperties(physical_device, &m_device_properties);
@@ -386,7 +386,8 @@ void VulkanContext::PopulateBackendInfoAdapters(VideoConfig* config, const GPULi
 
 void VulkanContext::PopulateBackendInfoFeatures(VideoConfig* config, VkPhysicalDevice gpu,
                                                 const VkPhysicalDeviceProperties& properties,
-                                                const VkPhysicalDeviceFeatures& features)
+                                                const VkPhysicalDeviceFeatures& features,
+                                                const VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT& raster_order_attachment_access_features)
 {
   config->backend_info.MaxTextureSize = properties.limits.maxImageDimension2D;
   config->backend_info.bUsesLowerLeftOrigin = false;
@@ -439,26 +440,7 @@ void VulkanContext::PopulateBackendInfoFeatures(VideoConfig* config, VkPhysicalD
   }
   else
   {
-      u32 extension_count;
-      VkResult res =
-              vkEnumerateDeviceExtensionProperties(gpu, nullptr, &extension_count, nullptr);
-      std::vector<VkExtensionProperties> available_extension_list(extension_count);
-
-      if (res == VK_SUCCESS)
-      {
-          res = vkEnumerateDeviceExtensionProperties(gpu, nullptr, &extension_count,
-                                                     available_extension_list.data());
-          if (res == VK_SUCCESS)
-          {
-              auto ExtensionSupported = [&](const char* name) {
-                  return std::any_of(available_extension_list.begin(), available_extension_list.end(),
-                              [name](const VkExtensionProperties& extension) { return extension.extensionName == name; });
-              };
-
-              config->backend_info.bSupportsFramebufferFetch = ExtensionSupported("VK_ARM_rasterization_order_attachment_access")
-                                                                || ExtensionSupported("VK_EXT_rasterization_order_attachment_access");
-          }
-      }
+      config->backend_info.bSupportsFramebufferFetch = raster_order_attachment_access_features.rasterizationOrderColorAttachmentAccess;
   }
 
   // Our usage of primitive restart appears to be broken on AMD's binary drivers.
@@ -606,8 +588,8 @@ bool VulkanContext::SelectDeviceExtensions(bool enable_surface)
 
   AddExtension(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, false);
   AddExtension(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME, false);
-  if (!AddExtension("VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS", false))
-      AddExtension("VK_ARM_RASTERIZATION_ORDER_ATTACHMENT_ACCESS", false);
+  if (!AddExtension(VK_EXT_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, false))
+      AddExtension(VK_ARM_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_EXTENSION_NAME, false);
 
   return true;
 }
@@ -646,6 +628,7 @@ bool VulkanContext::SelectDeviceFeatures()
   m_device_features.shaderClipDistance = available_features.shaderClipDistance;
   m_device_features.depthClamp = available_features.depthClamp;
   m_device_features.textureCompressionBC = available_features.textureCompressionBC;
+
   return true;
 }
 
