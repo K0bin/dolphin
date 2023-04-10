@@ -89,14 +89,19 @@ public:
     }
     else if constexpr (is_preprocess)
     {
-      if (sub_command == VCD_LO || sub_command == VCD_HI)
+      auto& system = Core::System::GetInstance();
+      auto& fifo = system.GetFifo();
+      if (fifo.UseDeterministicGPUThread())
       {
-        VertexLoaderManager::g_preprocess_vat_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
-      }
-      else if (sub_command == CP_VAT_REG_A || sub_command == CP_VAT_REG_B ||
-               sub_command == CP_VAT_REG_C)
-      {
-        VertexLoaderManager::g_preprocess_vat_dirty[command & CP_VAT_MASK] = true;
+        if (sub_command == VCD_LO || sub_command == VCD_HI)
+        {
+          VertexLoaderManager::g_preprocess_vat_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
+        }
+        else if (sub_command == CP_VAT_REG_A || sub_command == CP_VAT_REG_B ||
+                   sub_command == CP_VAT_REG_C)
+        {
+          VertexLoaderManager::g_preprocess_vat_dirty[command & CP_VAT_MASK] = true;
+        }
       }
     }
     GetCPState().LoadCPReg(command, value);
@@ -107,7 +112,10 @@ public:
 
     if constexpr (is_preprocess)
     {
-      LoadBPRegPreprocess(command, value, m_cycles);
+      auto& system = Core::System::GetInstance();
+      auto& fifo = system.GetFifo();
+      if (fifo.UseDeterministicGPUThread())
+        LoadBPRegPreprocess(command, value, m_cycles);
     }
     else
     {
@@ -120,9 +128,16 @@ public:
     m_cycles += 6;
 
     if constexpr (is_preprocess)
-      PreprocessIndexedXF(array, index, address, size);
+    {
+      auto& system = Core::System::GetInstance();
+      auto& fifo = system.GetFifo();
+      if (fifo.UseDeterministicGPUThread())
+        PreprocessIndexedXF(array, index, address, size);
+    }
     else
+    {
       LoadIndexedXF(array, index, address, size);
+    }
   }
   OPCODE_CALLBACK(void OnPrimitiveCommand(OpcodeDecoder::Primitive primitive, u8 vat,
                                           u32 vertex_size, u16 num_vertices, const u8* vertex_data))
@@ -160,9 +175,10 @@ public:
         auto& memory = system.GetMemory();
         const u8* const start_address = memory.GetPointer(address);
 
-        system.GetFifo().PushFifoAuxBuffer(start_address, size);
+        auto& fifo = system.GetFifo();
+        fifo.PushFifoAuxBuffer(start_address, size);
 
-        if (start_address != nullptr)
+        if (fifo.UseDeterministicGPUThread() && start_address != nullptr)
         {
           Run(start_address, size, *this);
         }
@@ -172,15 +188,7 @@ public:
         const u8* start_address;
 
         auto& fifo = system.GetFifo();
-        if (fifo.UseDeterministicGPUThread())
-        {
-          start_address = static_cast<u8*>(fifo.PopFifoAuxBuffer(size));
-        }
-        else
-        {
-          auto& memory = system.GetMemory();
-          start_address = memory.GetPointer(address);
-        }
+        start_address = static_cast<u8*>(fifo.PopFifoAuxBuffer(size));
 
         // Avoid the crash if memory.GetPointer failed ..
         if (start_address != nullptr)

@@ -78,7 +78,6 @@ private:
   void ReadDataFromFifo(Core::System& system, u32 readPtr);
   void ReadDataFromFifoOnCPU(Core::System& system, u32 readPtr);
   int RunGpuOnCpu(Core::System& system, int ticks);
-  int WaitForGpuThread(Core::System& system, int ticks);
   static void SyncGPUCallback(Core::System& system, u64 ticks, s64 cyclesLate);
 
   static constexpr u32 FIFO_SIZE = 2 * 1024 * 1024;
