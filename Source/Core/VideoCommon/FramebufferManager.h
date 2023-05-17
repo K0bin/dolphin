@@ -115,6 +115,7 @@ public:
   AbstractPipeline* GetClearPipeline(bool clear_color, bool clear_alpha, bool clear_z) const;
 
   // Reads a framebuffer value back from the GPU. This may block if the cache is not current.
+  void PeekEFB(bool depth, u32 x, u32 y, void* out_ptr);
   u32 PeekEFBColor(u32 x, u32 y);
   float PeekEFBDepth(u32 x, u32 y);
   void SetEFBCacheTileSize(u32 size);
@@ -141,22 +142,53 @@ protected:
 
   struct EFBCacheTile
   {
+    // Whether or not the tile exists in the readback texture
     bool present;
+
+    // Bitmask where each bit is one of the last 8 frames.
+    // If it's 1, the tile was accessed in that particular frame
     u8 frame_access_mask;
   };
 
   // EFB cache - for CPU EFB access
+  struct BufferedEFBPeek
+  {
+    u32 texture_index;
+    u32 draw_call_count;
+    bool needs_flush;
+    u32 x;
+    u32 y;
+  };
+
   // Tiles are ordered left-to-right, then top-to-bottom
   struct EFBCacheData
   {
     std::unique_ptr<AbstractTexture> texture;
     std::unique_ptr<AbstractFramebuffer> framebuffer;
-    std::unique_ptr<AbstractStagingTexture> readback_texture;
+    std::array<std::unique_ptr<AbstractStagingTexture>, 16> readback_textures;
     std::unique_ptr<AbstractPipeline> copy_pipeline;
     std::vector<EFBCacheTile> tiles;
+
+    // List of EFB peeks
+    // Used for the past frame EFB peek mode.
+    std::vector<BufferedEFBPeek> last_frame_peeks;
+    std::vector<BufferedEFBPeek> peeks;
+
+    // The index of the readback texture to write to. If past frame EFB peeks aren't enabled, this
+    // is always 0.
+    u32 readback_texture_index = 0;
+
+    // Decides whether or not the cache needs to be invalidated at the next token
     bool out_of_date;
+
+    // Whether or not there's any active tiles. Used to avoid needlessly iterating over the array of
+    // tiles.
     bool has_active_tiles;
+
+    // Whether or not the cache should be refreshed at the next token.
     bool needs_refresh;
+
+    // Whether or not the readback texture needs to be flushed
     bool needs_flush;
   };
 
@@ -178,16 +210,32 @@ protected:
   bool CompilePokePipelines();
   void DestroyPokePipelines();
 
-  bool IsUsingTiledEFBCache() const;
+  bool IsUsingTiledEFBCache() const { return m_efb_cache_tile_size > 0; }
+
+  u32 GetTileIndex(u32 x, u32 y) const
+  {
+    if (!IsUsingTiledEFBCache())
+      return 0;
+
+    const u32 tile_x = x / m_efb_cache_tile_size;
+    const u32 tile_y = y / m_efb_cache_tile_size;
+    return (tile_y * m_efb_cache_tile_row_stride) + tile_x;
+  }
+
   bool IsEFBCacheTilePresent(bool depth, u32 x, u32 y, u32* tile_index) const;
+
   MathUtil::Rectangle<int> GetEFBCacheTileRect(u32 tile_index) const;
   void PopulateEFBCache(bool depth, u32 tile_index, bool async = false);
+  void EnqueueBufferedEFBPeek(bool depth, u32 draw_call, u32 x, u32 y);
 
   void CreatePokeVertices(std::vector<EFBPokeVertex>* destination_list, u32 x, u32 y, float z,
                           u32 color);
 
   void DrawPokeVertices(const EFBPokeVertex* vertices, u32 vertex_count,
                         const AbstractPipeline* pipeline);
+
+  void CopyEFB(bool depth, MathUtil::Rectangle<int> src_rect, MathUtil::Rectangle<int> dst_rect,
+               AbstractStagingTexture* dst);
 
   std::tuple<u32, u32> CalculateTargetSize();
 
@@ -218,6 +266,8 @@ protected:
 
   // EFB cache - for CPU EFB access (EFB peeks/pokes), not for EFB copies
 
+  bool m_past_frame_efb_peeks;
+
   // Width and height of a tile in pixels at 1x IR. 0 indicates non-tiled, in which case a single
   // tile is used for the entire EFB.
   // Note that as EFB peeks and pokes are a CPU feature, they always operate at 1x IR.
@@ -226,6 +276,8 @@ protected:
   u32 m_efb_cache_tile_row_stride = 1;
   EFBCacheData m_efb_color_cache = {};
   EFBCacheData m_efb_depth_cache = {};
+
+  u32 m_frame_counter = 0;
 
   // EFB clear pipelines
   // Indexed by [color_write_enabled][alpha_write_enabled][depth_write_enabled]

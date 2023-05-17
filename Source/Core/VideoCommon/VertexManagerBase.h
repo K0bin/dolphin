@@ -164,6 +164,10 @@ public:
   // Call at the end of a frame.
   void OnEndFrame();
 
+  u32 DrawCounter() const {
+    return m_draw_counter;
+  }
+
 protected:
   // When utility uniforms are used, the GX uniforms need to be re-written afterwards.
   static void InvalidateConstants();

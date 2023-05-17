@@ -31,7 +31,8 @@ constexpr size_t MAX_POKE_VERTICES = 32768;
 
 std::unique_ptr<FramebufferManager> g_framebuffer_manager;
 
-FramebufferManager::FramebufferManager() : m_prev_efb_format(PixelFormat::INVALID_FMT)
+FramebufferManager::FramebufferManager()
+    : m_prev_efb_format(PixelFormat::INVALID_FMT), m_past_frame_efb_peeks(true)
 {
 }
 
@@ -433,24 +434,10 @@ void FramebufferManager::DestroyConversionPipelines()
     pipeline.reset();
 }
 
-bool FramebufferManager::IsUsingTiledEFBCache() const
-{
-  return m_efb_cache_tile_size > 0;
-}
-
 bool FramebufferManager::IsEFBCacheTilePresent(bool depth, u32 x, u32 y, u32* tile_index) const
 {
+  *tile_index = GetTileIndex(x, y);
   const EFBCacheData& data = depth ? m_efb_depth_cache : m_efb_color_cache;
-  if (!IsUsingTiledEFBCache())
-  {
-    *tile_index = 0;
-  }
-  else
-  {
-    const u32 tile_x = x / m_efb_cache_tile_size;
-    const u32 tile_y = y / m_efb_cache_tile_size;
-    *tile_index = (tile_y * m_efb_cache_tile_row_stride) + tile_x;
-  }
   return data.tiles[*tile_index].present;
 }
 
@@ -468,49 +455,142 @@ MathUtil::Rectangle<int> FramebufferManager::GetEFBCacheTileRect(u32 tile_index)
       std::min(start_y + m_efb_cache_tile_size, static_cast<u32>(EFB_HEIGHT)));
 }
 
-u32 FramebufferManager::PeekEFBColor(u32 x, u32 y)
+void FramebufferManager::PeekEFB(bool depth, u32 x, u32 y, void* out_ptr)
 {
   // The y coordinate here assumes upper-left origin, but the readback texture is lower-left in GL.
   if (g_ActiveConfig.backend_info.bUsesLowerLeftOrigin)
     y = EFB_HEIGHT - 1 - y;
 
-  u32 tile_index;
-  if (!IsEFBCacheTilePresent(false, x, y, &tile_index))
-    PopulateEFBCache(false, tile_index);
+  EFBCacheData& data = depth ? m_efb_depth_cache : m_efb_color_cache;
 
-  m_efb_color_cache.tiles[tile_index].frame_access_mask |= 1;
-
-  if (m_efb_color_cache.needs_flush)
+  if (m_past_frame_efb_peeks)
   {
-    m_efb_color_cache.readback_texture->Flush();
-    m_efb_color_cache.needs_flush = false;
-  }
+    u32 draw_counter = g_vertex_manager->DrawCounter();
 
+    BufferedEFBPeek* best_candidate = data.last_frame_peeks.size() > data.peeks.size() ?
+                                          &data.last_frame_peeks[data.peeks.size()] :
+                                          nullptr;
+    if (best_candidate != nullptr &&
+        (data.readback_textures[best_candidate->texture_index] == nullptr ||
+         best_candidate->draw_call_count - draw_counter >= 50))
+    {
+      best_candidate = nullptr;
+    }
+
+    if (best_candidate == nullptr)
+    {
+      // Find the peek with the closest draw call count instead
+      u32 best_candidate_draw_diff = std::numeric_limits<s32>::max();
+      for (u32 i = 0; i < data.last_frame_peeks.size(); i++)
+      {
+        BufferedEFBPeek& buffered_peek = data.last_frame_peeks[i];
+        if (data.readback_textures[buffered_peek.texture_index] == nullptr)
+          continue;
+
+        u32 diff = static_cast<u32>(std::abs(static_cast<s32>(buffered_peek.draw_call_count) -
+                                             static_cast<s32>(draw_counter)));
+
+        if (diff < best_candidate_draw_diff && diff <= 100)
+        {
+          best_candidate_draw_diff = diff;
+          best_candidate = &buffered_peek;
+        }
+        else if (diff > best_candidate_draw_diff)
+        {
+          // The list is ordered. We're not gonna find a better entry from here.
+          break;
+        }
+      }
+    }
+
+    if (best_candidate != nullptr)
+    {
+      WARN_LOG_FMT(VIDEO,
+                   "Doing EFB {} peek at: {},{} with draw: {} in frame {}. using buffered peek: at "
+                   "{},{} with draw: {}",
+                   depth ? "depth" : "color", x, y, draw_counter, m_frame_counter,
+                   best_candidate->x, best_candidate->y, best_candidate->draw_call_count);
+
+      u32 tile_index = GetTileIndex(best_candidate->x, best_candidate->y);
+      const MathUtil::Rectangle<int> rect = GetEFBCacheTileRect(tile_index);
+      const bool is_within_tile =
+          x >= static_cast<u32>(rect.left) && x < static_cast<u32>(rect.right) &&
+          y > static_cast<u32>(rect.top) && y < static_cast<u32>(rect.bottom);
+
+      u32 old_peek_x = x;
+      u32 old_peek_y = y;
+      if (!is_within_tile)
+      {
+        // The coords for this peek are outside of the tile, use the previous coords
+        old_peek_x = best_candidate->x;
+        old_peek_y = best_candidate->y;
+      }
+
+      AbstractStagingTexture* readback_texture =
+          data.readback_textures[best_candidate->texture_index].get();
+      if (best_candidate->needs_flush)
+      {
+        readback_texture->Flush();
+        best_candidate->needs_flush = false;
+      }
+
+      readback_texture->ReadTexel(old_peek_x - static_cast<u32>(rect.left),
+                                  old_peek_y - static_cast<u32>(rect.top), out_ptr);
+    }
+
+    EnqueueBufferedEFBPeek(depth, draw_counter, x, y);
+
+    if (best_candidate == nullptr)
+    {
+      WARN_LOG_FMT(VIDEO,
+                   "Doing EFB {} peek at: {},{} with draw: {}. Could not find buffered peek.",
+                   depth ? "depth" : "color", x, y, draw_counter);
+
+      // There was no old data we can use, use the latest data.
+      BufferedEFBPeek* peek = &data.peeks.back();
+
+      AbstractStagingTexture* readback_texture = data.readback_textures[peek->texture_index].get();
+      if (peek->needs_flush)
+      {
+        readback_texture->Flush();
+        peek->needs_flush = false;
+      }
+
+      u32 tile_index = GetTileIndex(x, y);
+      const MathUtil::Rectangle<int> rect = GetEFBCacheTileRect(tile_index);
+      readback_texture->ReadTexel(x - static_cast<u32>(rect.left), y - static_cast<u32>(rect.top),
+                                  out_ptr);
+    }
+  }
+  else
+  {
+    u32 tile_index;
+    if (!IsEFBCacheTilePresent(false, x, y, &tile_index))
+      PopulateEFBCache(false, tile_index);
+
+    data.tiles[tile_index].frame_access_mask |= 1;
+
+    if (data.needs_flush)
+    {
+      data.readback_textures[0]->Flush();
+      data.needs_flush = false;
+    }
+
+    data.readback_textures[0]->ReadTexel(x, y, out_ptr);
+  }
+}
+
+u32 FramebufferManager::PeekEFBColor(u32 x, u32 y)
+{
   u32 value;
-  m_efb_color_cache.readback_texture->ReadTexel(x, y, &value);
+  PeekEFB(false, x, y, &value);
   return value;
 }
 
 float FramebufferManager::PeekEFBDepth(u32 x, u32 y)
 {
-  // The y coordinate here assumes upper-left origin, but the readback texture is lower-left in GL.
-  if (g_ActiveConfig.backend_info.bUsesLowerLeftOrigin)
-    y = EFB_HEIGHT - 1 - y;
-
-  u32 tile_index;
-  if (!IsEFBCacheTilePresent(true, x, y, &tile_index))
-    PopulateEFBCache(true, tile_index);
-
-  m_efb_depth_cache.tiles[tile_index].frame_access_mask |= 1;
-
-  if (m_efb_depth_cache.needs_flush)
-  {
-    m_efb_depth_cache.readback_texture->Flush();
-    m_efb_depth_cache.needs_flush = false;
-  }
-
   float value;
-  m_efb_depth_cache.readback_texture->ReadTexel(x, y, &value);
+  PeekEFB(true, x, y, &value);
   return value;
 }
 
@@ -528,7 +608,8 @@ void FramebufferManager::SetEFBCacheTileSize(u32 size)
 
 void FramebufferManager::RefreshPeekCache()
 {
-  if (!m_efb_color_cache.needs_refresh && !m_efb_depth_cache.needs_refresh)
+  if (!g_ActiveConfig.bEFBAccessDeferInvalidation ||
+      (!m_efb_color_cache.needs_refresh && !m_efb_depth_cache.needs_refresh))
   {
     // The cache has already been refreshed.
     return;
@@ -610,6 +691,16 @@ void FramebufferManager::EndOfFrame()
     m_efb_color_cache.tiles[i].frame_access_mask <<= 1;
     m_efb_depth_cache.tiles[i].frame_access_mask <<= 1;
   }
+
+  std::swap(m_efb_color_cache.last_frame_peeks, m_efb_color_cache.peeks);
+  m_efb_color_cache.peeks.clear();
+  std::swap(m_efb_depth_cache.last_frame_peeks, m_efb_depth_cache.peeks);
+  m_efb_depth_cache.peeks.clear();
+
+  if (m_past_frame_efb_peeks)
+    InvalidatePeekCache(true);
+
+  m_frame_counter++;
 }
 
 bool FramebufferManager::CompileReadbackPipelines()
@@ -729,14 +820,17 @@ bool FramebufferManager::CreateReadbackFramebuffer()
   }
 
   // Staging texture use the full EFB dimensions, as this is the buffer for the whole cache.
-  m_efb_color_cache.readback_texture = g_gfx->CreateStagingTexture(
-      StagingTextureType::Mutable,
-      TextureConfig(EFB_WIDTH, EFB_HEIGHT, 1, 1, 1, GetEFBColorFormat(), 0));
-  m_efb_depth_cache.readback_texture = g_gfx->CreateStagingTexture(
-      StagingTextureType::Mutable,
-      TextureConfig(EFB_WIDTH, EFB_HEIGHT, 1, 1, 1, GetEFBDepthCopyFormat(), 0));
-  if (!m_efb_color_cache.readback_texture || !m_efb_depth_cache.readback_texture)
-    return false;
+  if (!m_past_frame_efb_peeks)
+  {
+    m_efb_color_cache.readback_textures[0] = g_gfx->CreateStagingTexture(
+        StagingTextureType::Mutable,
+        TextureConfig(EFB_WIDTH, EFB_HEIGHT, 1, 1, 1, GetEFBColorFormat(), 0));
+    m_efb_depth_cache.readback_textures[0] = g_gfx->CreateStagingTexture(
+        StagingTextureType::Mutable,
+        TextureConfig(EFB_WIDTH, EFB_HEIGHT, 1, 1, 1, GetEFBDepthCopyFormat(), 0));
+    if (!m_efb_color_cache.readback_textures[0] || !m_efb_depth_cache.readback_textures[0])
+      return false;
+  }
 
   u32 total_tiles = 1;
   if (IsUsingTiledEFBCache())
@@ -762,34 +856,41 @@ bool FramebufferManager::CreateReadbackFramebuffer()
 void FramebufferManager::DestroyReadbackFramebuffer()
 {
   auto DestroyCache = [](EFBCacheData& data) {
-    data.readback_texture.reset();
+    data.readback_textures = {};
     data.framebuffer.reset();
     data.texture.reset();
     data.needs_refresh = false;
     data.has_active_tiles = false;
+    data.readback_texture_index = 0;
+    data.last_frame_peeks = {};
+    data.peeks = {};
   };
   DestroyCache(m_efb_color_cache);
   DestroyCache(m_efb_depth_cache);
 }
 
-void FramebufferManager::PopulateEFBCache(bool depth, u32 tile_index, bool async)
+void FramebufferManager::CopyEFB(bool depth, MathUtil::Rectangle<int> src_rect,
+                                 MathUtil::Rectangle<int> dst_rect, AbstractStagingTexture* dst)
 {
-  FlushEFBPokes();
-  g_vertex_manager->OnCPUEFBAccess();
+  ASSERT(src_rect.GetWidth() == dst_rect.GetWidth() &&
+         src_rect.GetHeight() == dst_rect.GetHeight());
+  ASSERT((depth && dst->GetFormat() == GetEFBDepthCopyFormat()) ||
+         (!depth && dst->GetFormat() == GetEFBColorFormat()));
+
+  const bool is_full_copy = static_cast<u32>(src_rect.GetWidth()) == dst->GetWidth() &&
+                            static_cast<u32>(src_rect.GetHeight()) == dst->GetHeight();
 
   // Force the path through the intermediate texture, as we can't do an image copy from a depth
   // buffer directly to a staging texture (must be the whole resource).
   const bool force_intermediate_copy =
-      depth &&
-      (!g_ActiveConfig.backend_info.bSupportsDepthReadback ||
-       (!g_ActiveConfig.backend_info.bSupportsPartialDepthCopies && IsUsingTiledEFBCache()) ||
-       !AbstractTexture::IsCompatibleDepthAndColorFormats(m_efb_depth_texture->GetFormat(),
-                                                          GetEFBDepthCopyFormat()));
+      depth && (!g_ActiveConfig.backend_info.bSupportsDepthReadback ||
+                (!g_ActiveConfig.backend_info.bSupportsPartialDepthCopies && !is_full_copy) ||
+                !AbstractTexture::IsCompatibleDepthAndColorFormats(m_efb_depth_texture->GetFormat(),
+                                                                   GetEFBDepthCopyFormat()));
 
   // Issue a copy from framebuffer -> copy texture if we have >1xIR or MSAA on.
   EFBCacheData& data = depth ? m_efb_depth_cache : m_efb_color_cache;
-  const MathUtil::Rectangle<int> rect = GetEFBCacheTileRect(tile_index);
-  const MathUtil::Rectangle<int> native_rect = ConvertEFBRectangle(rect);
+  const MathUtil::Rectangle<int> native_rect = ConvertEFBRectangle(src_rect);
   AbstractTexture* src_texture =
       depth ? ResolveEFBDepthTexture(native_rect) : ResolveEFBColorTexture(native_rect);
   if (GetEFBScale() != 1 || force_intermediate_copy)
@@ -810,7 +911,8 @@ void FramebufferManager::PopulateEFBCache(bool depth, u32 tile_index, bool async
     // Viewport will not be TILE_SIZExTILE_SIZE for the last row of tiles, assuming a tile size of
     // 64, because 528 is not evenly divisible by 64.
     g_gfx->SetAndDiscardFramebuffer(data.framebuffer.get());
-    g_gfx->SetViewportAndScissor(MathUtil::Rectangle<int>(0, 0, rect.GetWidth(), rect.GetHeight()));
+    g_gfx->SetViewportAndScissor(
+        MathUtil::Rectangle<int>(0, 0, dst_rect.GetWidth(), dst_rect.GetHeight()));
     g_gfx->SetPipeline(data.copy_pipeline.get());
     g_gfx->SetTexture(0, src_texture);
     g_gfx->SetSamplerState(0, depth ? RenderState::GetPointSamplerState() :
@@ -819,27 +921,91 @@ void FramebufferManager::PopulateEFBCache(bool depth, u32 tile_index, bool async
 
     // Copy from EFB or copy texture to staging texture.
     // No need to call FinishedRendering() here because CopyFromTexture() transitions.
-    data.readback_texture->CopyFromTexture(
-        data.texture.get(), MathUtil::Rectangle<int>(0, 0, rect.GetWidth(), rect.GetHeight()), 0, 0,
-        rect);
+    dst->CopyFromTexture(data.texture.get(),
+                         MathUtil::Rectangle<int>(0, 0, dst_rect.GetWidth(), dst_rect.GetHeight()),
+                         0, 0, dst_rect);
 
     g_gfx->EndUtilityDrawing();
   }
   else
   {
-    data.readback_texture->CopyFromTexture(src_texture, rect, 0, 0, rect);
+    dst->CopyFromTexture(src_texture, src_rect, 0, 0, dst_rect);
   }
+}
+
+void FramebufferManager::PopulateEFBCache(bool depth, u32 tile_index, bool async)
+{
+  FlushEFBPokes();
+  g_vertex_manager->OnCPUEFBAccess();
+
+  const MathUtil::Rectangle<int> rect = GetEFBCacheTileRect(tile_index);
+  EFBCacheData& data = depth ? m_efb_depth_cache : m_efb_color_cache;
+  this->CopyEFB(depth, rect, rect, data.readback_textures[0].get());
 
   // Wait until the copy is complete.
   if (!async)
   {
-    data.readback_texture->Flush();
+    data.readback_textures[0]->Flush();
     data.needs_flush = false;
   }
   else
   {
     data.needs_flush = true;
   }
+  data.has_active_tiles = true;
+  data.out_of_date = false;
+  data.tiles[tile_index].present = true;
+}
+
+void FramebufferManager::EnqueueBufferedEFBPeek(bool depth, u32 draw_call, u32 x, u32 y)
+{
+  FlushEFBPokes();
+  g_vertex_manager->OnCPUEFBAccess();
+
+  u32 tile_index = GetTileIndex(x, y);
+  const MathUtil::Rectangle<int> rect = GetEFBCacheTileRect(tile_index);
+  EFBCacheData& data = depth ? m_efb_depth_cache : m_efb_color_cache;
+  BufferedEFBPeek peek = {};
+
+  // If the cached tile hasn't been invalidated, we reuse the previous staging texture
+  bool is_present = data.tiles[tile_index].present;
+  if (!is_present)
+  {
+    data.readback_texture_index = (data.readback_texture_index + 1) % data.readback_textures.size();
+
+    for (auto iter = data.last_frame_peeks.begin(); iter != data.last_frame_peeks.end();)
+    {
+      if (iter->texture_index == data.readback_texture_index)
+      {
+        iter = data.last_frame_peeks.erase(iter);
+        continue;
+      }
+      iter++;
+    }
+  }
+
+  if (data.readback_textures[data.readback_texture_index] == nullptr) [[unlikely]]
+  {
+    AbstractTextureFormat format = depth ? GetEFBDepthCopyFormat() : GetEFBColorFormat();
+    data.readback_textures[data.readback_texture_index] = g_gfx->CreateStagingTexture(
+        StagingTextureType::Mutable,
+        TextureConfig(rect.GetWidth(), rect.GetHeight(), 1, 1, 1, format, 0));
+    is_present = false;
+  }
+
+  if (!is_present)
+  {
+    this->CopyEFB(depth, rect, MathUtil::Rectangle<int>(0, 0, rect.GetWidth(), rect.GetHeight()),
+                  data.readback_textures[data.readback_texture_index].get());
+  }
+
+  peek.needs_flush = true;
+  peek.draw_call_count = draw_call;
+  peek.x = x;
+  peek.y = y;
+  peek.texture_index = data.readback_texture_index;
+
+  data.peeks.push_back(peek);
   data.has_active_tiles = true;
   data.out_of_date = false;
   data.tiles[tile_index].present = true;
@@ -950,7 +1116,7 @@ void FramebufferManager::PokeEFBColor(u32 x, u32 y, u32 color)
   // Update the peek cache if it's valid, since we know the color of the pixel now.
   u32 tile_index;
   if (IsEFBCacheTilePresent(false, x, y, &tile_index))
-    m_efb_color_cache.readback_texture->WriteTexel(x, y, &color);
+    m_efb_color_cache.readback_textures[0]->WriteTexel(x, y, &color);
 }
 
 void FramebufferManager::PokeEFBDepth(u32 x, u32 y, float depth)
@@ -968,7 +1134,7 @@ void FramebufferManager::PokeEFBDepth(u32 x, u32 y, float depth)
   // Update the peek cache if it's valid, since we know the color of the pixel now.
   u32 tile_index;
   if (IsEFBCacheTilePresent(true, x, y, &tile_index))
-    m_efb_depth_cache.readback_texture->WriteTexel(x, y, &depth);
+    m_efb_depth_cache.readback_textures[0]->WriteTexel(x, y, &depth);
 }
 
 void FramebufferManager::CreatePokeVertices(std::vector<EFBPokeVertex>* destination_list, u32 x,
