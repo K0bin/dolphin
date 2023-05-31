@@ -465,17 +465,16 @@ void FramebufferManager::PeekEFB(bool depth, u32 x, u32 y, void* out_ptr)
 
   if (m_past_frame_efb_peeks)
   {
-    // THE HEURISTIC CAUSES FLICKERING WITH THE LENS FLARES IN MARIO GALAXY
-    // IT SEEMS LIKE WE NEED TO VALUE LOCALITY OVER THE DRAW CALL COUNTER
-
-    u32 draw_counter = g_vertex_manager->DrawCounter();
-
     BufferedEFBPeek* best_candidate = data.last_frame_peeks.size() > data.peeks.size() ?
                                           &data.last_frame_peeks[data.peeks.size()] :
                                           nullptr;
+
+    s32 same_index_tolerance = !g_ActiveConfig.bEFBAccessDeferInvalidation ? 20 : 1;
+
     if (best_candidate != nullptr &&
         (data.readback_textures[best_candidate->texture_index] == nullptr ||
-         best_candidate->draw_call_count - draw_counter >= 50))
+         std::abs(static_cast<s32>(best_candidate->invalidation_counter) -
+                  static_cast<s32>(data.invalidation_counter)) > same_index_tolerance))
     {
       best_candidate = nullptr;
     }
@@ -492,10 +491,11 @@ void FramebufferManager::PeekEFB(bool depth, u32 x, u32 y, void* out_ptr)
         if (data.readback_textures[buffered_peek.texture_index] == nullptr)
           continue;
 
-        u32 diff = static_cast<u32>(std::abs(static_cast<s32>(buffered_peek.draw_call_count) -
-                                             static_cast<s32>(draw_counter)));
+        u32 diff = static_cast<u32>(std::abs(static_cast<s32>(buffered_peek.invalidation_counter) -
+                                             static_cast<s32>(data.invalidation_counter)));
 
-        if (diff < best_candidate_draw_diff && diff <= 100)
+        u32 tolerance = !g_ActiveConfig.bEFBAccessDeferInvalidation ? 100 : 2;
+        if (diff < best_candidate_draw_diff && diff <= tolerance)
         {
           best_candidate_draw_diff = diff;
           best_candidate = &buffered_peek;
@@ -510,17 +510,22 @@ void FramebufferManager::PeekEFB(bool depth, u32 x, u32 y, void* out_ptr)
 
     if (best_candidate != nullptr)
     {
-      WARN_LOG_FMT(VIDEO,
-                   "Doing EFB {} peek at: {},{} with draw: {} in frame {}. using buffered peek: at "
-                   "{},{} with draw: {}",
-                   depth ? "depth" : "color", x, y, draw_counter, m_frame_counter,
-                   best_candidate->x, best_candidate->y, best_candidate->draw_call_count);
 
       u32 tile_index = GetTileIndex(best_candidate->x, best_candidate->y);
       const MathUtil::Rectangle<int> rect = GetEFBCacheTileRect(tile_index);
       const bool is_within_tile =
           x >= static_cast<u32>(rect.left) && x < static_cast<u32>(rect.right) &&
-          y > static_cast<u32>(rect.top) && y < static_cast<u32>(rect.bottom);
+          y >= static_cast<u32>(rect.top) && y < static_cast<u32>(rect.bottom);
+
+	  if (!is_within_tile || best_candidate->invalidation_counter != data.invalidation_counter)
+	  {
+        WARN_LOG_FMT(VIDEO,
+                     "Doing EFB {} peek at: {},{} with invalidation: {} in frame {}. using "
+                     "buffered peek: at "
+                     "{},{} with invalidation: {}",
+                     depth ? "depth" : "color", x, y, data.invalidation_counter, m_frame_counter,
+                     best_candidate->x, best_candidate->y, best_candidate->invalidation_counter);
+	  }
 
       u32 old_peek_x = x;
       u32 old_peek_y = y;
@@ -543,13 +548,13 @@ void FramebufferManager::PeekEFB(bool depth, u32 x, u32 y, void* out_ptr)
                                   old_peek_y - static_cast<u32>(rect.top), out_ptr);
     }
 
-    EnqueueBufferedEFBPeek(depth, draw_counter, x, y);
+    EnqueueBufferedEFBPeek(depth, x, y);
 
     if (best_candidate == nullptr)
     {
       WARN_LOG_FMT(VIDEO,
                    "Doing EFB {} peek at: {},{} with draw: {}. Could not find buffered peek.",
-                   depth ? "depth" : "color", x, y, draw_counter);
+                   depth ? "depth" : "color", x, y, data.invalidation_counter);
 
       // There was no old data we can use, use the latest data.
       BufferedEFBPeek* peek = &data.peeks.back();
@@ -660,6 +665,7 @@ void FramebufferManager::InvalidatePeekCache(bool forced)
 
     m_efb_color_cache.has_active_tiles = false;
     m_efb_color_cache.out_of_date = false;
+    m_efb_color_cache.invalidation_counter++;
   }
   if (forced || m_efb_depth_cache.out_of_date)
   {
@@ -675,6 +681,7 @@ void FramebufferManager::InvalidatePeekCache(bool forced)
 
     m_efb_depth_cache.has_active_tiles = false;
     m_efb_depth_cache.out_of_date = false;
+    m_efb_depth_cache.invalidation_counter++;
   }
 }
 
@@ -705,6 +712,8 @@ void FramebufferManager::EndOfFrame()
   if (m_past_frame_efb_peeks)
     InvalidatePeekCache(true);
 
+  m_efb_color_cache.invalidation_counter = 0;
+  m_efb_depth_cache.invalidation_counter = 0;
   m_frame_counter++;
 }
 
@@ -962,7 +971,7 @@ void FramebufferManager::PopulateEFBCache(bool depth, u32 tile_index, bool async
   data.tiles[tile_index].present = true;
 }
 
-void FramebufferManager::EnqueueBufferedEFBPeek(bool depth, u32 draw_call, u32 x, u32 y)
+void FramebufferManager::EnqueueBufferedEFBPeek(bool depth, u32 x, u32 y)
 {
   FlushEFBPokes();
   g_vertex_manager->OnCPUEFBAccess();
@@ -1005,7 +1014,7 @@ void FramebufferManager::EnqueueBufferedEFBPeek(bool depth, u32 draw_call, u32 x
   }
 
   peek.needs_flush = true;
-  peek.draw_call_count = draw_call;
+  peek.invalidation_counter = data.invalidation_counter;
   peek.x = x;
   peek.y = y;
   peek.texture_index = data.readback_texture_index;

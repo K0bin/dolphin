@@ -154,7 +154,7 @@ protected:
   struct BufferedEFBPeek
   {
     u32 texture_index;
-    u32 draw_call_count;
+    u32 invalidation_counter;
     bool needs_flush;
     u32 x;
     u32 y;
@@ -190,6 +190,8 @@ protected:
 
     // Whether or not the readback texture needs to be flushed
     bool needs_flush;
+
+    u32 invalidation_counter = 0;
   };
 
   bool CreateEFBFramebuffer();
@@ -226,7 +228,7 @@ protected:
 
   MathUtil::Rectangle<int> GetEFBCacheTileRect(u32 tile_index) const;
   void PopulateEFBCache(bool depth, u32 tile_index, bool async = false);
-  void EnqueueBufferedEFBPeek(bool depth, u32 draw_call, u32 x, u32 y);
+  void EnqueueBufferedEFBPeek(bool depth, u32 x, u32 y);
 
   void CreatePokeVertices(std::vector<EFBPokeVertex>* destination_list, u32 x, u32 y, float z,
                           u32 color);
