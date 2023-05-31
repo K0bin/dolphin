@@ -465,6 +465,9 @@ void FramebufferManager::PeekEFB(bool depth, u32 x, u32 y, void* out_ptr)
 
   if (m_past_frame_efb_peeks)
   {
+    // THE HEURISTIC CAUSES FLICKERING WITH THE LENS FLARES IN MARIO GALAXY
+    // IT SEEMS LIKE WE NEED TO VALUE LOCALITY OVER THE DRAW CALL COUNTER
+
     u32 draw_counter = g_vertex_manager->DrawCounter();
 
     BufferedEFBPeek* best_candidate = data.last_frame_peeks.size() > data.peeks.size() ?
@@ -479,6 +482,8 @@ void FramebufferManager::PeekEFB(bool depth, u32 x, u32 y, void* out_ptr)
 
     if (best_candidate == nullptr)
     {
+        WARN_LOG_FMT(VIDEO, "Looking for closest EFB peek instead.");
+
       // Find the peek with the closest draw call count instead
       u32 best_candidate_draw_diff = std::numeric_limits<s32>::max();
       for (u32 i = 0; i < data.last_frame_peeks.size(); i++)
