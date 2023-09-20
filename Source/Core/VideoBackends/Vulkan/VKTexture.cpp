@@ -297,6 +297,8 @@ void VKTexture::CopyRectangleFromTexture(const AbstractTexture* src,
 
   // Only restore the source layout. Destination is restored by FinishedRendering().
   src_texture->TransitionToLayout(g_command_buffer_mgr->GetCurrentCommandBuffer(), old_src_layout);
+
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::StagingCopyRectFromTexture, 0, 0, 0, 0);
 }
 
 void VKTexture::ResolveFromTexture(const AbstractTexture* src, const MathUtil::Rectangle<int>& rect,
@@ -585,6 +587,8 @@ void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer, VkImageLayout
                        &barrier);
 
   m_layout = new_layout;
+
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::TransitionToLayout, 0, 0, 0, 0);
 }
 
 void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer,
@@ -688,6 +692,8 @@ void VKTexture::TransitionToLayout(VkCommandBuffer command_buffer,
 
   vkCmdPipelineBarrier(command_buffer, srcStageMask, dstStageMask, 0, 0, nullptr, 0, nullptr, 1,
                        &barrier);
+
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::TransitionToComputeLayout, 0, 0, 0, 0);
 }
 
 VKStagingTexture::VKStagingTexture(PrivateTag, StagingTextureType type, const TextureConfig& config,
@@ -861,6 +867,8 @@ void VKStagingTexture::CopyFromTexture(const AbstractTexture* src,
 
   m_needs_flush = true;
   m_flush_fence_counter = g_command_buffer_mgr->GetCurrentFenceCounter();
+
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::StagingCopyFromTexture, 0, 0, 0, 0);
 }
 
 void VKStagingTexture::CopyFromTextureToLinearImage(const VKTexture* src_tex,
@@ -953,6 +961,8 @@ void VKStagingTexture::CopyToTexture(const MathUtil::Rectangle<int>& src_rect, A
 
   m_needs_flush = true;
   m_flush_fence_counter = g_command_buffer_mgr->GetCurrentFenceCounter();
+
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::StagingCopyToTexture, 0, 0, 0, 0);
 }
 
 bool VKStagingTexture::Map()

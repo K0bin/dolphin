@@ -351,6 +351,8 @@ void ShaderCache::ClearPipelineCache(T& cache, Y& disk_cache)
 
 void ShaderCache::LoadCaches()
 {
+  return;
+
   // Ubershader caches, if present.
   if (g_ActiveConfig.backend_info.bSupportsShaderBinaries)
   {

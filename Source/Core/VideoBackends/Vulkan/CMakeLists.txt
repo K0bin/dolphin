@@ -31,6 +31,8 @@ add_library(videovulkan
   VKVertexFormat.h
   VKVertexManager.cpp
   VKVertexManager.h
+  VkDebug.cpp
+  VkDebug.h
   VulkanContext.cpp
   VulkanContext.h
   VulkanLoader.cpp

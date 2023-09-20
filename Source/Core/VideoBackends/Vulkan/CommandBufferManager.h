@@ -20,6 +20,7 @@
 #include "Common/Semaphore.h"
 
 #include "VideoBackends/Vulkan/Constants.h"
+#include "VideoBackends/Vulkan/VkDebug.h"
 
 namespace Vulkan
 {
@@ -46,6 +47,10 @@ public:
   }
   // Allocates a descriptors set from the pool reserved for the current frame.
   VkDescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout set_layout);
+
+  VkDebug& GetDebug() {
+    return *GetCurrentFrameResources().debug;
+  }
 
   // Fence "counters" are used to track which commands have been completed by the GPU.
   // If the last completed fence counter is greater or equal to N, it means that the work
@@ -94,6 +99,8 @@ public:
   void DeferImageDestruction(VkImage object, VmaAllocation alloc);
   void DeferImageViewDestruction(VkImageView object);
 
+  void PrintFaults();
+
 private:
   bool CreateCommandBuffers();
   void DestroyCommandBuffers();
@@ -129,6 +136,7 @@ private:
   {
     std::vector<VkDescriptorPool> descriptor_pools;
     u32 current_descriptor_pool_index = 0;
+    std::unique_ptr<VkDebug> debug = nullptr;
   };
 
   FrameResources& GetCurrentFrameResources() { return m_frame_resources[m_current_frame]; }

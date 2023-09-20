@@ -84,6 +84,7 @@ void PerfQuery::DisableQuery(PerfQueryGroup group)
     m_query_next_pos = (m_query_next_pos + 1) % PERF_QUERY_BUFFER_SIZE;
     m_query_count.fetch_add(1, std::memory_order_relaxed);
   }
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::DisableQuery, 0, 0, 0, 0);
 }
 
 void PerfQuery::ResetQuery()
@@ -100,6 +101,7 @@ void PerfQuery::ResetQuery()
                       PERF_QUERY_BUFFER_SIZE);
 
   std::memset(m_query_buffer.data(), 0, sizeof(ActiveQuery) * m_query_buffer.size());
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::ResetQuery, 0, 0, 0, 0);
 }
 
 u32 PerfQuery::GetQueryResult(PerfQueryType type)
@@ -230,6 +232,8 @@ void PerfQuery::ReadbackQueries(u32 query_count)
 
   m_query_readback_pos = (m_query_readback_pos + query_count) % PERF_QUERY_BUFFER_SIZE;
   m_query_count.fetch_sub(query_count, std::memory_order_relaxed);
+
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::ReadbackQuery, 0, 0, 0, 0);
 }
 
 void PerfQuery::PartialFlush(bool blocking)

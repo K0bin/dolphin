@@ -5,6 +5,7 @@
 
 #include "Common/Align.h"
 #include "Common/Assert.h"
+#include "Common/Hash.h"
 
 #include "VideoBackends/Vulkan/ObjectCache.h"
 #include "VideoBackends/Vulkan/ShaderCompiler.h"
@@ -15,9 +16,9 @@
 namespace Vulkan
 {
 VKShader::VKShader(ShaderStage stage, std::vector<u32> spv, VkShaderModule mod,
-                   std::string_view name)
+                   std::string_view name, u64 hash)
     : AbstractShader(stage), m_spv(std::move(spv)), m_module(mod),
-      m_compute_pipeline(VK_NULL_HANDLE), m_name(name)
+      m_compute_pipeline(VK_NULL_HANDLE), m_name(name), m_hash(hash)
 {
   if (!m_name.empty() && g_ActiveConfig.backend_info.bSupportsSettingObjectNames)
   {
@@ -28,11 +29,13 @@ VKShader::VKShader(ShaderStage stage, std::vector<u32> spv, VkShaderModule mod,
     name_info.pObjectName = m_name.data();
     vkSetDebugUtilsObjectNameEXT(g_vulkan_context->GetDevice(), &name_info);
   }
+
+  INFO_LOG_FMT(HOST_GPU, "Shader NAME: {}, HASH: {}", m_name, m_hash);
 }
 
-VKShader::VKShader(std::vector<u32> spv, VkPipeline compute_pipeline, std::string_view name)
+VKShader::VKShader(std::vector<u32> spv, VkPipeline compute_pipeline, std::string_view name, u64 hash)
     : AbstractShader(ShaderStage::Compute), m_spv(std::move(spv)), m_module(VK_NULL_HANDLE),
-      m_compute_pipeline(compute_pipeline), m_name(name)
+      m_compute_pipeline(compute_pipeline), m_name(name), m_hash(hash)
 {
   if (!m_name.empty() && g_ActiveConfig.backend_info.bSupportsSettingObjectNames)
   {
@@ -43,6 +46,8 @@ VKShader::VKShader(std::vector<u32> spv, VkPipeline compute_pipeline, std::strin
     name_info.pObjectName = m_name.data();
     vkSetDebugUtilsObjectNameEXT(g_vulkan_context->GetDevice(), &name_info);
   }
+
+  INFO_LOG_FMT(HOST_GPU, "Shader NAME: {}, HASH: {}", m_name, m_hash);
 }
 
 VKShader::~VKShader()
@@ -76,9 +81,11 @@ CreateShaderObject(ShaderStage stage, ShaderCompiler::SPIRVCodeVector spv, std::
     return VK_NULL_HANDLE;
   }
 
+  u64 hash = Common::GetHash64(reinterpret_cast<u8*>(spv.data()), spv.size() * sizeof(u32), 128);
+
   // If it's a graphics shader, we defer pipeline creation.
   if (stage != ShaderStage::Compute)
-    return std::make_unique<VKShader>(stage, std::move(spv), mod, name);
+    return std::make_unique<VKShader>(stage, std::move(spv), mod, name, hash);
 
   // If it's a compute shader, we create the pipeline straight away.
   const VkComputePipelineCreateInfo pipeline_info = {
@@ -104,7 +111,7 @@ CreateShaderObject(ShaderStage stage, ShaderCompiler::SPIRVCodeVector spv, std::
     return nullptr;
   }
 
-  return std::make_unique<VKShader>(std::move(spv), pipeline, name);
+  return std::make_unique<VKShader>(std::move(spv), pipeline, name, hash);
 }
 
 std::unique_ptr<VKShader> VKShader::CreateFromSource(ShaderStage stage, std::string_view source,

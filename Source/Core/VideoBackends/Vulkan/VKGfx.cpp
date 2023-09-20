@@ -209,6 +209,8 @@ void VKGfx::ClearRegion(const MathUtil::Rectangle<int>& target_rc, bool color_en
     return;
 
   AbstractGfx::ClearRegion(target_rc, color_enable, alpha_enable, z_enable, color, z);
+
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::ClearRegion, 0, 0, 0, 0);
 }
 
 void VKGfx::Flush()
@@ -581,6 +583,9 @@ void VKGfx::Draw(u32 base_vertex, u32 num_vertices)
     return;
 
   vkCmdDraw(g_command_buffer_mgr->GetCurrentCommandBuffer(), num_vertices, 1, base_vertex, 0);
+
+  const VKPipeline* pipeline = StateTracker::GetInstance()->GetPipeline();
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::Draw, pipeline->GetVSHash(), pipeline->GetPSHash(), pipeline->GetGSHash(), num_vertices);
 }
 
 void VKGfx::DrawIndexed(u32 base_index, u32 num_indices, u32 base_vertex)
@@ -590,6 +595,9 @@ void VKGfx::DrawIndexed(u32 base_index, u32 num_indices, u32 base_vertex)
 
   vkCmdDrawIndexed(g_command_buffer_mgr->GetCurrentCommandBuffer(), num_indices, 1, base_index,
                    base_vertex, 0);
+
+  const VKPipeline* pipeline = StateTracker::GetInstance()->GetPipeline();
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::DrawIndexed, pipeline->GetVSHash(), pipeline->GetPSHash(), pipeline->GetGSHash(), num_indices);
 }
 
 void VKGfx::DispatchComputeShader(const AbstractShader* shader, u32 groupsize_x, u32 groupsize_y,
@@ -598,6 +606,8 @@ void VKGfx::DispatchComputeShader(const AbstractShader* shader, u32 groupsize_x,
   StateTracker::GetInstance()->SetComputeShader(static_cast<const VKShader*>(shader));
   if (StateTracker::GetInstance()->BindCompute())
     vkCmdDispatch(g_command_buffer_mgr->GetCurrentCommandBuffer(), groups_x, groups_y, groups_z);
+
+  EMIT_VK_DEBUG_MARKER(VkDebugCommand::Dispatch, 0, groups_x, groups_y, groups_z);
 }
 
 SurfaceInfo VKGfx::GetSurfaceInfo() const
